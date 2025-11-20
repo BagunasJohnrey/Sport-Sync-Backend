@@ -43,31 +43,69 @@ class ProductModel extends BaseModel {
     return this.executeQuery(query);
   }
 
-  async updateStock(productId, newQuantity, userId, changeType = 'Adjustment') {
-    const product = await this.findById(productId);
-    
+  async updateStock(productId, newQuantity, userId = null, changeType = 'Adjustment') {
+  try {
+    const products = await this.executeQuery(
+      'SELECT * FROM products WHERE product_id = ?',
+      [productId]
+    );
+    const product = products[0];
+
     if (!product) {
       throw new Error('Product not found');
     }
 
+    let validUserId = userId;
+
+    if (!validUserId) {
+      // Pick any existing user from users table
+      const users = await this.executeQuery(
+        'SELECT user_id FROM users LIMIT 1'
+      );
+      if (users.length === 0) {
+        throw new Error('No valid user found for stock log');
+      }
+      validUserId = users[0].user_id;
+    } else {
+      // Check if provided userId exists
+      const users = await this.executeQuery(
+        'SELECT user_id FROM users WHERE user_id = ?',
+        [validUserId]
+      );
+      if (users.length === 0) {
+        // Fallback to any user in database
+        const fallbackUser = await this.executeQuery(
+          'SELECT user_id FROM users LIMIT 1'
+        );
+        if (fallbackUser.length === 0) {
+          throw new Error('No valid user found for stock log');
+        }
+        validUserId = fallbackUser[0].user_id;
+      }
+    }
+
     const quantityChange = newQuantity - product.quantity;
-    
-    // Update product quantity
+
     await this.executeQuery(
       'UPDATE products SET quantity = ?, last_updated = CURRENT_TIMESTAMP WHERE product_id = ?',
       [newQuantity, productId]
     );
 
-    // Log stock change
     await this.executeQuery(
       `INSERT INTO stock_logs 
        (product_id, user_id, change_type, quantity_change, previous_quantity, new_quantity, timestamp) 
        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
-      [productId, userId, changeType, quantityChange, product.quantity, newQuantity]
+      [productId, validUserId, changeType, quantityChange, product.quantity, newQuantity]
     );
 
-    return { previousQuantity: product.quantity, newQuantity, quantityChange };
+    return { previousQuantity: product.quantity, newQuantity, quantityChange, userId: validUserId };
+
+  } catch (error) {
+    console.error('[updateStock Error]', error.message);
+    throw error;
   }
+}
+
 
   getPrimaryKey() {
     return 'product_id';
