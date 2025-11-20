@@ -7,21 +7,21 @@ const productController = {
     try {
       const { page = 1, limit = 10, category_id, status, low_stock } = req.query;
       const offset = (page - 1) * limit;
-      
+
       let conditions = {};
       if (category_id) conditions.category_id = category_id;
       if (status) conditions.status = status;
-      
+
       let products;
       if (low_stock === 'true') {
         products = await productModel.getLowStockProducts();
       } else {
         products = await productModel.findAllWithCategory(conditions);
       }
-      
+
       // Apply pagination manually for now
       const paginatedProducts = products.slice(offset, offset + parseInt(limit));
-      
+
       res.json({
         success: true,
         data: paginatedProducts,
@@ -40,49 +40,49 @@ const productController = {
     }
   },
 
-getProductById: async (req, res) => {
-  try {
-    const products = await productModel.executeQuery(
-      `SELECT p.*, pc.category_name 
+  getProductById: async (req, res) => {
+    try {
+      const products = await productModel.executeQuery(
+        `SELECT p.*, pc.category_name 
        FROM products p 
        LEFT JOIN product_categories pc ON p.category_id = pc.category_id 
        WHERE p.product_id = ?`,
-      [req.params.id]
-    );
-    
-    const product = products[0];
-    
-    if (!product) {
-      return res.status(404).json({
-        success: false,
-        message: 'Product not found'
-      });
-    }
-    
-    res.json({
-      success: true,
-      data: product
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
-  }
-},
+        [req.params.id]
+      );
 
-  // Get product by barcode
-  getProductByBarcode: async (req, res) => {
-    try {
-      const product = await productModel.findByBarcode(req.params.barcode);
-      
+      const product = products[0];
+
       if (!product) {
         return res.status(404).json({
           success: false,
           message: 'Product not found'
         });
       }
-      
+
+      res.json({
+        success: true,
+        data: product
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        message: error.message
+      });
+    }
+  },
+
+  // Get product by barcode
+  getProductByBarcode: async (req, res) => {
+    try {
+      const product = await productModel.findByBarcode(req.params.barcode);
+
+      if (!product) {
+        return res.status(404).json({
+          success: false,
+          message: 'Product not found'
+        });
+      }
+
       res.json({
         success: true,
         data: product
@@ -140,7 +140,7 @@ getProductById: async (req, res) => {
       };
 
       const newProduct = await productModel.create(productData);
-      
+
       res.status(201).json({
         success: true,
         message: 'Product created successfully',
@@ -170,7 +170,7 @@ getProductById: async (req, res) => {
       updateData.last_updated = new Date();
 
       const updatedProduct = await productModel.update(productId, updateData);
-      
+
       res.json({
         success: true,
         message: 'Product updated successfully',
@@ -199,7 +199,7 @@ getProductById: async (req, res) => {
       }
 
       const result = await productModel.updateStock(productId, quantity, userId, change_type);
-      
+
       res.json({
         success: true,
         message: 'Stock updated successfully',
@@ -217,22 +217,22 @@ getProductById: async (req, res) => {
   deleteProduct: async (req, res) => {
     try {
       const productId = req.params.id;
-      
+
       // Check if product has transaction history
-      const [transactions] = await productModel.executeQuery(
+      const transactions = await productModel.executeQuery(
         'SELECT COUNT(*) as transaction_count FROM transaction_items WHERE product_id = ?',
         [productId]
       );
-      
+
       if (transactions[0].transaction_count > 0) {
         return res.status(400).json({
           success: false,
           message: 'Cannot delete product with transaction history'
         });
       }
-      
+
       await productModel.delete(productId);
-      
+
       res.json({
         success: true,
         message: 'Product deleted successfully'
