@@ -40,37 +40,36 @@ const productController = {
     }
   },
 
-  // Get product by ID
-  getProductById: async (req, res) => {
-    try {
-      const [products] = await productModel.executeQuery(
-        `SELECT p.*, pc.category_name 
-         FROM products p 
-         LEFT JOIN product_categories pc ON p.category_id = pc.category_id 
-         WHERE p.product_id = ?`,
-        [req.params.id]
-      );
-      
-      const product = products[0];
-      
-      if (!product) {
-        return res.status(404).json({
-          success: false,
-          message: 'Product not found'
-        });
-      }
-      
-      res.json({
-        success: true,
-        data: product
-      });
-    } catch (error) {
-      res.status(500).json({
+getProductById: async (req, res) => {
+  try {
+    const products = await productModel.executeQuery(
+      `SELECT p.*, pc.category_name 
+       FROM products p 
+       LEFT JOIN product_categories pc ON p.category_id = pc.category_id 
+       WHERE p.product_id = ?`,
+      [req.params.id]
+    );
+    
+    const product = products[0];
+    
+    if (!product) {
+      return res.status(404).json({
         success: false,
-        message: error.message
+        message: 'Product not found'
       });
     }
-  },
+    
+    res.json({
+      success: true,
+      data: product
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+},
 
   // Get product by barcode
   getProductByBarcode: async (req, res) => {
