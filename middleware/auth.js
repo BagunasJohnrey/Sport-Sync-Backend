@@ -1,5 +1,4 @@
 const jwt = require('jsonwebtoken');
-const userModel = require('../models/userModel');
 
 const authMiddleware = {
   // Verify JWT token
@@ -18,14 +17,13 @@ const authMiddleware = {
       req.user = decoded;
       next();
     } catch (error) {
-      return res.status(400).json({
+      return res.status(401).json({
         success: false,
-        message: 'Invalid token.'
+        message: 'Invalid or expired token.'
       });
     }
   },
 
-  // Check if user has specific role
   requireRole: (roles) => {
     return (req, res, next) => {
       if (!req.user) {
@@ -46,7 +44,6 @@ const authMiddleware = {
     };
   },
 
-  // Optional token verification (for public routes that can have optional auth)
   optionalAuth: (req, res, next) => {
     const token = req.header('Authorization')?.replace('Bearer ', '');
     
@@ -55,8 +52,7 @@ const authMiddleware = {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
         req.user = decoded;
       } catch (error) {
-        // Token is invalid, but we don't block the request
-        console.log('Optional auth: Invalid token, continuing without user context');
+         console.log('Optional auth: Invalid token, continuing without user context');
       }
     }
     

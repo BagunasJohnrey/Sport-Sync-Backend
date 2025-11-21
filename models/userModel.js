@@ -6,24 +6,6 @@ class UserModel extends BaseModel {
     super('users');
   }
 
-  async create(userData) {
-    // Hash password before saving
-    if (userData.password_hash) {
-      userData.password_hash = await bcrypt.hash(userData.password_hash, 10);
-    }
-    
-    return super.create(userData);
-  }
-
-  async update(id, data) {
-    // Hash password if it's being updated
-    if (data.password_hash) {
-      data.password_hash = await bcrypt.hash(data.password_hash, 10);
-    }
-    
-    return super.update(id, data);
-  }
-
   async findByUsername(username) {
     const results = await this.executeQuery(
       'SELECT * FROM users WHERE username = ?',
@@ -51,7 +33,42 @@ class UserModel extends BaseModel {
     );
   }
 
-  // Override getPrimaryKey for users table
+  async storeRefreshToken(userId, token, expiresAt) {
+    const hashedToken = await bcrypt.hash(token, 10);
+    await this.executeQuery(
+      'INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES (?, ?, ?)',
+      [userId, hashedToken, expiresAt]
+    );
+  }
+
+  async verifyRefreshToken(userId, plainToken) {
+    const results = await this.executeQuery(
+      `SELECT rt.*, u.role, u.username 
+       FROM refresh_tokens rt
+       JOIN users u ON rt.user_id = u.user_id
+       WHERE rt.user_id = ? AND rt.expires_at > NOW()`,
+      [userId]
+    );
+
+    for (const record of results) {
+      const isMatch = await bcrypt.compare(plainToken, record.token);
+      if (isMatch) return record;
+    }
+    
+    return null;
+  }
+
+  async deleteRefreshTokenForUser(userId) {
+    await this.deleteAllUserTokens(userId);
+  }
+
+  async deleteAllUserTokens(userId) {
+    await this.executeQuery(
+      'DELETE FROM refresh_tokens WHERE user_id = ?',
+      [userId]
+    );
+  }
+
   getPrimaryKey() {
     return 'user_id';
   }

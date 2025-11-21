@@ -4,50 +4,30 @@ const userModel = require('../models/userModel');
 const { validationResult } = require('express-validator');
 
 const authController = {
-  // User login
+
   login: async (req, res) => {
     try {
       const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return res.status(400).json({
-          success: false,
-          errors: errors.array()
-        });
-      }
+      if (!errors.isEmpty())
+        return res.status(400).json({ success: false, errors: errors.array() });
 
       const { username, password } = req.body;
 
-      // Find user by username
       const user = await userModel.findByUsername(username);
-      if (!user) {
-        return res.status(401).json({
-          success: false,
-          message: 'Invalid username or password'
-        });
-      }
+      if (!user)
+        return res.status(401).json({ success: false, message: 'Invalid credentials' });
 
-      // Check if user is active
       if (user.status !== 'Active') {
-        return res.status(401).json({
-          success: false,
-          message: 'Account is inactive. Please contact administrator.'
-        });
+        return res.status(401).json({ success: false, message: 'Account is inactive.' });
       }
 
-      // Verify password
       const isValidPassword = await userModel.verifyPassword(password, user.password_hash);
-      if (!isValidPassword) {
-        return res.status(401).json({
-          success: false,
-          message: 'Invalid username or password'
-        });
-      }
+      if (!isValidPassword)
+        return res.status(401).json({ success: false, message: 'Invalid credentials' });
 
-      // Update last login
       await userModel.updateLastLogin(user.user_id);
 
-      // Generate JWT token
-      const token = jwt.sign(
+      const accessToken = jwt.sign(
         {
           user_id: user.user_id,
           username: user.username,
@@ -55,72 +35,131 @@ const authController = {
           email: user.email
         },
         process.env.JWT_SECRET,
-        { expiresIn: '24h' } // Token expires in 24 hours
+        { expiresIn: '15m' }
       );
 
-      // Remove password from response
+      const refreshToken = jwt.sign(
+        { user_id: user.user_id },
+        process.env.REFRESH_TOKEN_SECRET || 'fallback_secret',
+        { expiresIn: '7d' }
+      );
+
+      const refreshExpiresAt = new Date();
+      refreshExpiresAt.setDate(refreshExpiresAt.getDate() + 7);
+      await userModel.storeRefreshToken(user.user_id, refreshToken, refreshExpiresAt);
+
+      res.cookie('refresh_token', refreshToken, {
+        httpOnly: true,
+        secure: true,
+        sameSite: 'None',
+        maxAge: 7 * 24 * 60 * 60 * 1000 
+      });
+
       const { password_hash, ...userWithoutPassword } = user;
 
       res.json({
         success: true,
         message: 'Login successful',
-        data: {
-          user: userWithoutPassword,
-          token,
-          expiresIn: '24h'
-        }
+        accessToken,
+        user: userWithoutPassword
       });
+
     } catch (error) {
-      res.status(500).json({
-        success: false,
-        message: error.message
-      });
+      console.error(error);
+      res.status(500).json({ success: false, message: 'Internal server error' });
     }
   },
 
-  // User registration (for creating new users - admin only)
+  refreshToken: async (req, res) => {
+    const cookies = req.cookies;
+    if (!cookies?.refresh_token) 
+      return res.status(401).json({ success: false, message: 'No token provided' });
+
+    const refreshToken = cookies.refresh_token;
+
+    try {
+      jwt.verify(
+        refreshToken,
+        process.env.REFRESH_TOKEN_SECRET || 'fallback_secret',
+        async (err, decoded) => {
+          if (err) 
+            return res.status(403).json({ success: false, message: 'Invalid token signature' });
+
+          const foundTokenRecord = await userModel.verifyRefreshToken(decoded.user_id, refreshToken);
+          if (!foundTokenRecord) 
+            return res.status(403).json({ success: false, message: 'Token not found or reused' });
+
+          const user = await userModel.findById(decoded.user_id);
+          if (!user) 
+            return res.status(403).json({ success: false, message: 'User not found' });
+
+          const accessToken = jwt.sign(
+            {
+              user_id: user.user_id,
+              username: user.username,
+              role: user.role
+            },
+            process.env.JWT_SECRET,
+            { expiresIn: '15m' }
+          );
+
+          return res.json({ success: true, accessToken });
+        }
+      );
+    } catch (error) {
+      res.status(500).json({ success: false, message: 'Internal server error' });
+    }
+  },
+
+  logout: async (req, res) => {
+    const cookies = req.cookies;
+    if (!cookies?.refresh_token) 
+      return res.sendStatus(204);
+
+    const refreshToken = cookies.refresh_token;
+    
+    const decoded = jwt.decode(refreshToken);
+    if (decoded && decoded.user_id) {
+        await userModel.deleteRefreshTokenForUser(decoded.user_id);
+    }
+
+    res.clearCookie('refresh_token', {
+      httpOnly: true,
+      sameSite: 'None',
+      secure: true
+    });
+
+    res.json({ success: true, message: 'Logged out' });
+  },
+
   register: async (req, res) => {
     try {
       const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return res.status(400).json({
-          success: false,
-          errors: errors.array()
-        });
-      }
+      if (!errors.isEmpty())
+        return res.status(400).json({ success: false, errors: errors.array() });
 
       const { full_name, username, password, role, email } = req.body;
 
-      // Check if username already exists
-      const existingUser = await userModel.findByUsername(username);
-      if (existingUser) {
-        return res.status(400).json({
-          success: false,
-          message: 'Username already exists'
-        });
+      if (await userModel.findByUsername(username)) {
+        return res.status(400).json({ success: false, message: 'Username already exists' });
+      }
+      if (await userModel.findByEmail(email)) {
+        return res.status(400).json({ success: false, message: 'Email already exists' });
       }
 
-      // Check if email already exists
-      const existingEmail = await userModel.findByEmail(email);
-      if (existingEmail) {
-        return res.status(400).json({
-          success: false,
-          message: 'Email already exists'
-        });
-      }
+      const hashedPassword = await bcrypt.hash(password, 10);
 
       const userData = {
         full_name,
         username,
-        password_hash: password, // Will be hashed in the model
+        password_hash: hashedPassword,
         role: role || 'Cashier',
         email,
-        status: 'Active'
+        status: 'Active',
+        created_at: new Date()
       };
 
       const newUser = await userModel.create(userData);
-      
-      // Remove password from response
       const { password_hash, ...userResponse } = newUser;
 
       res.status(201).json({
@@ -128,51 +167,31 @@ const authController = {
         message: 'User registered successfully',
         data: userResponse
       });
+
     } catch (error) {
-      res.status(500).json({
-        success: false,
-        message: error.message
-      });
+      res.status(500).json({ success: false, message: error.message });
     }
   },
 
-  // Get current user profile
   getProfile: async (req, res) => {
     try {
       const user = await userModel.findById(req.user.user_id);
-      
-      if (!user) {
-        return res.status(404).json({
-          success: false,
-          message: 'User not found'
-        });
-      }
+      if (!user)
+        return res.status(404).json({ success: false, message: 'User not found' });
 
-      // Remove password from response
       const { password_hash, ...userResponse } = user;
+      res.json({ success: true, data: userResponse });
 
-      res.json({
-        success: true,
-        data: userResponse
-      });
     } catch (error) {
-      res.status(500).json({
-        success: false,
-        message: error.message
-      });
+      res.status(500).json({ success: false, message: error.message });
     }
   },
 
-  // Update user profile
   updateProfile: async (req, res) => {
     try {
       const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return res.status(400).json({
-          success: false,
-          errors: errors.array()
-        });
-      }
+      if (!errors.isEmpty())
+        return res.status(400).json({ success: false, errors: errors.array() });
 
       const userId = req.user.user_id;
       const { full_name, email } = req.body;
@@ -182,91 +201,43 @@ const authController = {
       if (email) updateData.email = email;
 
       const updatedUser = await userModel.update(userId, updateData);
-      
-      // Remove password from response
       const { password_hash, ...userResponse } = updatedUser;
 
-      res.json({
-        success: true,
-        message: 'Profile updated successfully',
-        data: userResponse
-      });
+      res.json({ success: true, message: 'Profile updated', data: userResponse });
+
     } catch (error) {
-      res.status(500).json({
-        success: false,
-        message: error.message
-      });
+      res.status(500).json({ success: false, message: error.message });
     }
   },
 
-  // Change password
   changePassword: async (req, res) => {
     try {
       const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return res.status(400).json({
-          success: false,
-          errors: errors.array()
-        });
-      }
+      if (!errors.isEmpty())
+        return res.status(400).json({ success: false, errors: errors.array() });
 
       const userId = req.user.user_id;
       const { current_password, new_password } = req.body;
 
-      // Get current user
       const user = await userModel.findById(userId);
-      
-      // Verify current password
+
       const isValidPassword = await userModel.verifyPassword(current_password, user.password_hash);
-      if (!isValidPassword) {
-        return res.status(400).json({
-          success: false,
-          message: 'Current password is incorrect'
-        });
-      }
+      if (!isValidPassword)
+        return res.status(400).json({ success: false, message: 'Current password incorrect' });
 
-      // Update password
-      await userModel.update(userId, { password_hash: new_password });
+      const newHashedPassword = await bcrypt.hash(new_password, 10);
 
-      res.json({
-        success: true,
-        message: 'Password changed successfully'
-      });
+      await userModel.update(userId, { password_hash: newHashedPassword });
+
+      res.json({ success: true, message: 'Password changed successfully' });
+
     } catch (error) {
-      res.status(500).json({
-        success: false,
-        message: error.message
-      });
+      res.status(500).json({ success: false, message: error.message });
     }
   },
 
-  // Verify token (check if still valid)
   verifyToken: async (req, res) => {
-    try {
-      // If we reach here, the token is valid (thanks to auth middleware)
-      const user = await userModel.findById(req.user.user_id);
-      
-      if (!user) {
-        return res.status(404).json({
-          success: false,
-          message: 'User not found'
-        });
-      }
-
-      // Remove password from response
-      const { password_hash, ...userResponse } = user;
-
-      res.json({
-        success: true,
-        message: 'Token is valid',
-        data: userResponse
-      });
-    } catch (error) {
-      res.status(500).json({
-        success: false,
-        message: error.message
-      });
-    }
+    res.json({ success: true, message: 'Token is valid', user: req.user });
   }
 };
 

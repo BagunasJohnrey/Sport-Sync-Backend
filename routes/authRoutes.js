@@ -4,7 +4,6 @@ const authController = require('../controllers/authController');
 const authMiddleware = require('../middleware/auth');
 const { body } = require('express-validator');
 
-// Validation rules
 const loginValidation = [
   body('username').notEmpty().withMessage('Username is required'),
   body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters')
@@ -30,12 +29,21 @@ const changePasswordValidation = [
 
 // Public routes
 router.post('/login', loginValidation, authController.login);
-router.post('/register', registerValidation, authController.register);
+router.get('/refresh', authController.refreshToken);
+router.get('/logout', authController.logout);
 
 // Protected routes
-router.get('/profile', authMiddleware.verifyToken, authController.getProfile);
-router.put('/profile', authMiddleware.verifyToken, updateProfileValidation, authController.updateProfile);
-router.post('/change-password', authMiddleware.verifyToken, changePasswordValidation, authController.changePassword);
-router.get('/verify', authMiddleware.verifyToken, authController.verifyToken);
+router.use(authMiddleware.verifyToken);
+
+router.get('/profile', authController.getProfile);
+router.put('/profile', updateProfileValidation, authController.updateProfile);
+router.post('/change-password', changePasswordValidation, authController.changePassword);
+router.get('/verify', authController.verifyToken);
+
+router.post('/register', 
+  authMiddleware.requireRole(['Admin']), 
+  registerValidation, 
+  authController.register
+);
 
 module.exports = router;
