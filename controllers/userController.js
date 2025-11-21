@@ -92,7 +92,8 @@ const userController = {
         role: role || 'Cashier',
         email,
         status: status || 'Active',
-        created_at: new Date()
+        created_at: new Date(),
+        last_updated: new Date()
       };
 
       const newUser = await userModel.create(userData);
