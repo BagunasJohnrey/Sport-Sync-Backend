@@ -5,17 +5,24 @@ const productController = {
   // Get all products
   getAllProducts: async (req, res) => {
     try {
-      const { page = 1, limit = 10, category_id, status, low_stock } = req.query;
+      // [UPDATED] Added 'search' to destructured query parameters
+      const { page = 1, limit = 10, category_id, status, low_stock, search } = req.query;
       const offset = (page - 1) * limit;
 
       let conditions = {};
       if (category_id) conditions.category_id = category_id;
       if (status) conditions.status = status;
+      
+      // [UPDATED] Add search term to conditions if present
+      if (search) {
+        conditions.search = search;
+      }
 
       let products;
       if (low_stock === 'true') {
         products = await productModel.getLowStockProducts();
       } else {
+        // The model will now handle the 'search' property inside conditions
         products = await productModel.findAllWithCategory(conditions);
       }
 
