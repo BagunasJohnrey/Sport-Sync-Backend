@@ -1,4 +1,5 @@
 const userModel = require('../models/userModel');
+const auditLogModel = require('../models/auditLogModel');
 const { validationResult } = require('express-validator');
 const bcrypt = require('bcryptjs');
 
@@ -101,6 +102,15 @@ const userController = {
 
       const newUser = await userModel.create(userData);
       
+      // Audit Log: Create User
+      // req.user.user_id is the Admin performing the action
+      // newUser.id is the new account ID (returned by BaseModel.create)
+      try {
+        await auditLogModel.logAction(req.user.user_id, 'CREATE_USER', 'users', newUser.id);
+      } catch (auditError) {
+        console.error('Failed to log create user action:', auditError);
+      }
+
       // Remove password hash from response
       const { password_hash, ...userResponse } = newUser;
       
@@ -141,6 +151,13 @@ const userController = {
 
       const updatedUser = await userModel.update(userId, updateData);
       
+      // Audit Log: Update User
+      try {
+        await auditLogModel.logAction(req.user.user_id, 'UPDATE_USER', 'users', userId);
+      } catch (auditError) {
+        console.error('Failed to log update user action:', auditError);
+      }
+
       // Remove password hash from response
       const { password_hash, ...userResponse } = updatedUser;
       
@@ -163,6 +180,13 @@ const userController = {
       const userId = req.params.id;
       
       await userModel.delete(userId);
+
+      // Audit Log: Delete User
+      try {
+        await auditLogModel.logAction(req.user.user_id, 'DELETE_USER', 'users', userId);
+      } catch (auditError) {
+        console.error('Failed to log delete user action:', auditError);
+      }
       
       res.json({
         success: true,
