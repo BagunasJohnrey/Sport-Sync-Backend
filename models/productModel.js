@@ -5,6 +5,7 @@ class ProductModel extends BaseModel {
     super('products');
   }
 
+  // Modified to handle 'search' parameter for name/barcode lookup
   async findAllWithCategory(conditions = {}) {
     let query = `
       SELECT p.*, pc.category_name 
@@ -13,11 +14,29 @@ class ProductModel extends BaseModel {
     `;
     
     const params = [];
+    const whereClauses = [];
     
-    if (Object.keys(conditions).length > 0) {
-      const whereClause = Object.keys(conditions).map(key => `p.${key} = ?`).join(' AND ');
-      query += ` WHERE ${whereClause}`;
-      params.push(...Object.values(conditions));
+    // Extract 'search' from conditions so it's not treated as a standard column
+    const { search, ...filters } = conditions;
+    
+    //Handle standard exact match filters (e.g., category_id, status)
+    if (Object.keys(filters).length > 0) {
+      Object.keys(filters).forEach(key => {
+        whereClauses.push(`p.${key} = ?`);
+        params.push(filters[key]);
+      });
+    }
+    
+    // Handle Search Logic (Partial match on product_name OR barcode)
+    if (search) {
+      whereClauses.push('(p.product_name LIKE ? OR p.barcode LIKE ?)');
+      const searchTerm = `%${search}%`; // Wrap with wildcards for partial match
+      params.push(searchTerm, searchTerm);
+    }
+    
+    // Construct the final WHERE clause
+    if (whereClauses.length > 0) {
+      query += ` WHERE ${whereClauses.join(' AND ')}`;
     }
     
     query += ' ORDER BY p.product_name';
@@ -44,68 +63,67 @@ class ProductModel extends BaseModel {
   }
 
   async updateStock(productId, newQuantity, userId = null, changeType = 'Adjustment') {
-  try {
-    const products = await this.executeQuery(
-      'SELECT * FROM products WHERE product_id = ?',
-      [productId]
-    );
-    const product = products[0];
-
-    if (!product) {
-      throw new Error('Product not found');
-    }
-
-    let validUserId = userId;
-
-    if (!validUserId) {
-      // Pick any existing user from users table
-      const users = await this.executeQuery(
-        'SELECT user_id FROM users LIMIT 1'
+    try {
+      const products = await this.executeQuery(
+        'SELECT * FROM products WHERE product_id = ?',
+        [productId]
       );
-      if (users.length === 0) {
-        throw new Error('No valid user found for stock log');
+      const product = products[0];
+
+      if (!product) {
+        throw new Error('Product not found');
       }
-      validUserId = users[0].user_id;
-    } else {
-      // Check if provided userId exists
-      const users = await this.executeQuery(
-        'SELECT user_id FROM users WHERE user_id = ?',
-        [validUserId]
-      );
-      if (users.length === 0) {
-        // Fallback to any user in database
-        const fallbackUser = await this.executeQuery(
+
+      let validUserId = userId;
+
+      if (!validUserId) {
+        // Pick any existing user from users table as fallback
+        const users = await this.executeQuery(
           'SELECT user_id FROM users LIMIT 1'
         );
-        if (fallbackUser.length === 0) {
+        if (users.length === 0) {
           throw new Error('No valid user found for stock log');
         }
-        validUserId = fallbackUser[0].user_id;
+        validUserId = users[0].user_id;
+      } else {
+        // Verify if provided userId exists
+        const users = await this.executeQuery(
+          'SELECT user_id FROM users WHERE user_id = ?',
+          [validUserId]
+        );
+        if (users.length === 0) {
+          // Fallback to any user if specific ID not found
+          const fallbackUser = await this.executeQuery(
+            'SELECT user_id FROM users LIMIT 1'
+          );
+          if (fallbackUser.length === 0) {
+            throw new Error('No valid user found for stock log');
+          }
+          validUserId = fallbackUser[0].user_id;
+        }
       }
+
+      const quantityChange = newQuantity - product.quantity;
+
+      await this.executeQuery(
+        'UPDATE products SET quantity = ?, last_updated = CURRENT_TIMESTAMP WHERE product_id = ?',
+        [newQuantity, productId]
+      );
+
+      await this.executeQuery(
+        `INSERT INTO stock_logs 
+         (product_id, user_id, change_type, quantity_change, previous_quantity, new_quantity, timestamp) 
+         VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+        [productId, validUserId, changeType, quantityChange, product.quantity, newQuantity]
+      );
+
+      return { previousQuantity: product.quantity, newQuantity, quantityChange, userId: validUserId };
+
+    } catch (error) {
+      console.error('[updateStock Error]', error.message);
+      throw error;
     }
-
-    const quantityChange = newQuantity - product.quantity;
-
-    await this.executeQuery(
-      'UPDATE products SET quantity = ?, last_updated = CURRENT_TIMESTAMP WHERE product_id = ?',
-      [newQuantity, productId]
-    );
-
-    await this.executeQuery(
-      `INSERT INTO stock_logs 
-       (product_id, user_id, change_type, quantity_change, previous_quantity, new_quantity, timestamp) 
-       VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
-      [productId, validUserId, changeType, quantityChange, product.quantity, newQuantity]
-    );
-
-    return { previousQuantity: product.quantity, newQuantity, quantityChange, userId: validUserId };
-
-  } catch (error) {
-    console.error('[updateStock Error]', error.message);
-    throw error;
   }
-}
-
 
   getPrimaryKey() {
     return 'product_id';
