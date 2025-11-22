@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const userModel = require('../models/userModel');
+const auditLogModel = require('../models/auditLogModel');
 const { validationResult } = require('express-validator');
 
 const authController = {
@@ -26,6 +27,13 @@ const authController = {
         return res.status(401).json({ success: false, message: 'Invalid credentials' });
 
       await userModel.updateLastLogin(user.user_id);
+
+      // Audit Log: User Login
+      try {
+        await auditLogModel.logAction(user.user_id, 'LOGIN', 'users', user.user_id);
+      } catch (logError) {
+        console.error('Failed to log login action:', logError);
+      }
 
       const accessToken = jwt.sign(
         {
@@ -228,6 +236,13 @@ const authController = {
       const newHashedPassword = await bcrypt.hash(new_password, 10);
 
       await userModel.update(userId, { password_hash: newHashedPassword });
+
+      // Audit Log: Change Password
+      try {
+        await auditLogModel.logAction(userId, 'CHANGE_PASSWORD', 'users', userId);
+      } catch (logError) {
+        console.error('Failed to log password change:', logError);
+      }
 
       res.json({ success: true, message: 'Password changed successfully' });
 
