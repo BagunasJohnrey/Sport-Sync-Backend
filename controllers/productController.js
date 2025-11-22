@@ -1,4 +1,5 @@
 const productModel = require('../models/productModel');
+const auditLogModel = require('../models/auditLogModel');
 const { validationResult } = require('express-validator');
 
 const productController = {
@@ -148,6 +149,13 @@ const productController = {
 
       const newProduct = await productModel.create(productData);
 
+      // Audit Log: Create Product
+      try {
+        await auditLogModel.logAction(req.user.user_id, 'CREATE_PRODUCT', 'products', newProduct.id);
+      } catch (auditError) {
+        console.error('Failed to log create product action:', auditError);
+      }
+
       res.status(201).json({
         success: true,
         message: 'Product created successfully',
@@ -178,6 +186,13 @@ const productController = {
 
       const updatedProduct = await productModel.update(productId, updateData);
 
+      // Audit Log: Update Product
+      try {
+        await auditLogModel.logAction(req.user.user_id, 'UPDATE_PRODUCT', 'products', productId);
+      } catch (auditError) {
+        console.error('Failed to log update product action:', auditError);
+      }
+
       res.json({
         success: true,
         message: 'Product updated successfully',
@@ -206,6 +221,13 @@ const productController = {
       }
 
       const result = await productModel.updateStock(productId, quantity, userId, change_type);
+
+      // Audit Log: Update Stock (Manual Adjustment)
+      try {
+        await auditLogModel.logAction(userId, 'UPDATE_STOCK', 'products', productId);
+      } catch (auditError) {
+        console.error('Failed to log stock update action:', auditError);
+      }
 
       res.json({
         success: true,
@@ -239,6 +261,13 @@ const productController = {
       }
 
       await productModel.delete(productId);
+
+      // Audit Log: Delete Product
+      try {
+        await auditLogModel.logAction(req.user.user_id, 'DELETE_PRODUCT', 'products', productId);
+      } catch (auditError) {
+        console.error('Failed to log delete product action:', auditError);
+      }
 
       res.json({
         success: true,
