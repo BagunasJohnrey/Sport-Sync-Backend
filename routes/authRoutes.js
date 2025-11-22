@@ -14,7 +14,8 @@ const registerValidation = [
   body('username').isLength({ min: 3 }).withMessage('Username must be at least 3 characters'),
   body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
   body('email').isEmail().withMessage('Valid email is required'),
-  body('role').isIn(['Admin', 'Manager', 'Cashier']).withMessage('Valid role is required')
+  // [Fixed] Changed 'Manager' to 'Staff'
+  body('role').isIn(['Admin', 'Staff', 'Cashier']).withMessage('Valid role is required')
 ];
 
 const updateProfileValidation = [

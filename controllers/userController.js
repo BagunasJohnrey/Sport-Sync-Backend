@@ -1,5 +1,6 @@
 const userModel = require('../models/userModel');
 const { validationResult } = require('express-validator');
+const bcrypt = require('bcryptjs');
 
 const userController = {
   // Get all users
@@ -85,15 +86,17 @@ const userController = {
         });
       }
 
+      // Hash the password before saving
+      const hashedPassword = await bcrypt.hash(password, 10);
+
       const userData = {
         full_name,
         username,
-        password_hash: password,
+        password_hash: hashedPassword,
         role: role || 'Cashier',
         email,
         status: status || 'Active',
-        created_at: new Date(),
-        last_updated: new Date()
+        created_at: new Date()
       };
 
       const newUser = await userModel.create(userData);

@@ -14,9 +14,9 @@ const userValidation = [
 // Apply authentication middleware to all user routes
 router.use(authMiddleware.verifyToken);
 
-// Only Admin and Manager can access user management
-router.get('/', authMiddleware.requireRole(['Admin', 'Manager']), userController.getAllUsers);
-router.get('/:id', authMiddleware.requireRole(['Admin', 'Manager']), userController.getUserById);
+// [Fixed] Only Admin can view/manage users (Staff cannot view users)
+router.get('/', authMiddleware.requireRole(['Admin']), userController.getAllUsers);
+router.get('/:id', authMiddleware.requireRole(['Admin']), userController.getUserById);
 router.post('/', authMiddleware.requireRole(['Admin']), userValidation, userController.createUser);
 router.put('/:id', authMiddleware.requireRole(['Admin']), userValidation, userController.updateUser);
 router.delete('/:id', authMiddleware.requireRole(['Admin']), userController.deleteUser);
