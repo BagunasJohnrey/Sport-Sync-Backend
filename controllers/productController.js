@@ -170,28 +170,68 @@ const productController = {
     }
   },
 
-  // Update product
+  // Updated updateProduct method
   updateProduct: async (req, res) => {
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
-        return res.status(400).json({
-          success: false,
-          errors: errors.array()
-        });
+        return res.status(400).json({ success: false, errors: errors.array() });
       }
 
       const productId = req.params.id;
       const updateData = { ...req.body };
       updateData.last_updated = new Date();
 
+      // Fetch old data to compare
+      const oldProduct = await productModel.findById(productId);
+      if (!oldProduct) {
+        return res.status(404).json({ success: false, message: 'Product not found' });
+      }
+
+      // Perform the update
       const updatedProduct = await productModel.update(productId, updateData);
 
-      // Audit Log: Update Product
-      try {
-        await auditLogModel.logAction(req.user.user_id, 'UPDATE_PRODUCT', 'products', productId);
-      } catch (auditError) {
-        console.error('Failed to log update product action:', auditError);
+      // Smart Contextual Logging
+      const userId = req.user.user_id;
+
+      // Detect Selling Price Change
+      if (updateData.selling_price && updateData.selling_price != oldProduct.selling_price) {
+        await auditLogModel.logAction(
+          userId, 
+          `${oldProduct.product_name} SELLING_PRICE_CHANGE: ${oldProduct.selling_price} -> ${updateData.selling_price}`, 
+          'products',
+          productId
+        );
+      }
+
+      // Detect Cost Price Change
+      if (updateData.cost_price && updateData.cost_price != oldProduct.cost_price) {
+        await auditLogModel.logAction(
+          userId, 
+          `${oldProduct.product_name} COST_PRICE_CHANGE: ${oldProduct.cost_price} -> ${updateData.cost_price}`, 
+          'products', 
+          productId
+        );
+      }
+
+      // Detect Quantity Change
+      if (updateData.quantity && updateData.quantity != oldProduct.quantity) {
+        await auditLogModel.logAction(
+          userId, 
+          `${oldProduct.product_name} QUANTITY_CHANGE: ${oldProduct.quantity} -> ${updateData.quantity}`, 
+          'products', 
+          productId
+        );
+      }
+
+      // Detect Product Name Change
+      if (updateData.product_name && updateData.product_name !== oldProduct.product_name) {
+        await auditLogModel.logAction(
+          userId, 
+          `NAME_CHANGE: ${oldProduct.product_name} -> ${updateData.product_name}`, 
+          'products', 
+          productId
+        );
       }
 
       res.json({
@@ -200,10 +240,7 @@ const productController = {
         data: updatedProduct
       });
     } catch (error) {
-      res.status(500).json({
-        success: false,
-        message: error.message
-      });
+      res.status(500).json({ success: false, message: error.message });
     }
   },
 
