@@ -4,17 +4,27 @@ const productController = require('../controllers/productController');
 const authMiddleware = require('../middleware/auth');
 const { body } = require('express-validator');
 
-const productValidation = [
+// Strict Validation for Creating Products (All fields required)
+const createProductValidation = [
   body('barcode').notEmpty().withMessage('Barcode is required'),
   body('product_name').notEmpty().withMessage('Product name is required'),
   body('category_id').isInt({ min: 1 }).withMessage('Valid category ID is required'),
   body('selling_price').isFloat({ min: 0 }).withMessage('Valid selling price is required')
 ];
 
+// Loose Validation for Updating Products (Fields are optional)
+const updateProductValidation = [
+  body('barcode').optional().notEmpty(),
+  body('product_name').optional().notEmpty(),
+  body('category_id').optional().isInt({ min: 1 }),
+  body('selling_price').optional().isFloat({ min: 0 }),
+  body('status').optional().isIn(['Active', 'Inactive'])
+];
+
 // Apply authentication
 router.use(authMiddleware.verifyToken);
 
-// View Products - Open to Admin, Staff, and Cashier
+// View Products
 router.get('/', 
   authMiddleware.requireRole(['Admin', 'Staff', 'Cashier']), 
   productController.getAllProducts
@@ -30,16 +40,16 @@ router.get('/:id',
   productController.getProductById
 );
 
-// Manage Products - Admin & Staff (Staff can edit stocks/inventory)
+// Manage Products
 router.post('/', 
   authMiddleware.requireRole(['Admin', 'Staff']), 
-  productValidation, 
+  createProductValidation, // Use Strict Validation
   productController.createProduct
 );
 
 router.put('/:id', 
   authMiddleware.requireRole(['Admin', 'Staff']), 
-  productValidation, 
+  updateProductValidation, // Use New Optional Validation
   productController.updateProduct
 );
 
@@ -48,7 +58,6 @@ router.patch('/:id/stock',
   productController.updateStock
 );
 
-// Delete - Admin only
 router.delete('/:id', 
   authMiddleware.requireRole(['Admin']), 
   productController.deleteProduct
