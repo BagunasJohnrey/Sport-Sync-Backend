@@ -125,6 +125,53 @@ class ProductModel extends BaseModel {
     }
   }
 
+  // Updated findAllWithCategory method in ProductModel
+  async findAllWithCategory(conditions = {}, sortOption = 'name_asc') {
+    let query = 
+      `SELECT p.*, pc.category_name 
+      FROM products p 
+      LEFT JOIN product_categories pc ON p.category_id = pc.category_id`;
+    
+    const params = [];
+    const whereClauses = [];
+    
+    // Extract special keys
+    const { search, ...filters } = conditions;
+    
+    // Standard Filters (Category, Status)
+    if (Object.keys(filters).length > 0) {
+      Object.keys(filters).forEach(key => {
+        whereClauses.push(`p.${key} = ?`);
+        params.push(filters[key]);
+      });
+    }
+    
+    // Search Logic (Name, Barcode, OR Category Name)
+    if (search) {
+      whereClauses.push('(p.product_name LIKE ? OR p.barcode LIKE ? OR pc.category_name LIKE ?)');
+      const searchTerm = `%${search}%`;
+      params.push(searchTerm, searchTerm, searchTerm);
+    }
+    
+    if (whereClauses.length > 0) {
+      query += ` WHERE ${whereClauses.join(' AND ')}`;
+    }
+    
+    // Dynamic Sorting
+    const sortMap = {
+      'price_asc': 'p.selling_price ASC',
+      'price_desc': 'p.selling_price DESC',
+      'newest': 'p.date_added DESC',
+      'name_asc': 'p.product_name ASC',
+      'name_desc': 'p.product_name DESC'
+    };
+
+    const orderBy = sortMap[sortOption] || 'p.product_name ASC';
+    query += ` ORDER BY ${orderBy}`;
+    
+    return this.executeQuery(query, params);
+  }
+
   getPrimaryKey() {
     return 'product_id';
   }

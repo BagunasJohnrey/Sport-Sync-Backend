@@ -3,31 +3,35 @@ const auditLogModel = require('../models/auditLogModel');
 const { validationResult } = require('express-validator');
 
 const productController = {
-  // Get all products
+  // Updated getAllProducts method
   getAllProducts: async (req, res) => {
     try {
-      // [UPDATED] Added 'search' to destructured query parameters
-      const { page = 1, limit = 10, category_id, status, low_stock, search } = req.query;
+      const { 
+        page = 1, 
+        limit = 10, 
+        category_id, 
+        status, 
+        low_stock, 
+        search, 
+        sort_by // e.g., 'price_desc', 'newest'
+      } = req.query;
+      
       const offset = (page - 1) * limit;
 
       let conditions = {};
       if (category_id) conditions.category_id = category_id;
       if (status) conditions.status = status;
-      
-      // [UPDATED] Add search term to conditions if present
-      if (search) {
-        conditions.search = search;
-      }
+      if (search) conditions.search = search;
 
       let products;
       if (low_stock === 'true') {
         products = await productModel.getLowStockProducts();
       } else {
-        // The model will now handle the 'search' property inside conditions
-        products = await productModel.findAllWithCategory(conditions);
+        // Pass the sort_by parameter to the model
+        products = await productModel.findAllWithCategory(conditions, sort_by);
       }
 
-      // Apply pagination manually for now
+      // Manual pagination (since we are fetching all sorted results)
       const paginatedProducts = products.slice(offset, offset + parseInt(limit));
 
       res.json({
@@ -41,10 +45,7 @@ const productController = {
         }
       });
     } catch (error) {
-      res.status(500).json({
-        success: false,
-        message: error.message
-      });
+      res.status(500).json({ success: false, message: error.message });
     }
   },
 
