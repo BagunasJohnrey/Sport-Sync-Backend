@@ -172,6 +172,35 @@ class ProductModel extends BaseModel {
     return this.executeQuery(query, params);
   }
 
+  //  Inventory Report Methods 
+async getInventorySummary() {
+  const query = `
+    SELECT
+      COUNT(*) as total_products,
+      COALESCE(SUM(quantity * cost_price), 0) as total_inventory_value,
+      SUM(CASE WHEN quantity <= reorder_level AND quantity > 0 THEN 1 ELSE 0 END) as low_stock_count,
+      SUM(CASE WHEN quantity = 0 THEN 1 ELSE 0 END) as out_of_stock_count
+    FROM products
+    WHERE status = 'Active'
+  `;
+  const result = await this.executeQuery(query);
+  return result[0];
+}
+
+async getInventoryByCategory() {
+  const query = `
+    SELECT
+      pc.category_name,
+      COUNT(p.product_id) as product_count,
+      COALESCE(SUM(p.quantity), 0) as total_stock
+    FROM products p
+    LEFT JOIN product_categories pc ON p.category_id = pc.category_id
+    WHERE p.status = 'Active'
+    GROUP BY pc.category_id
+  `;
+  return this.executeQuery(query);
+}
+
   getPrimaryKey() {
     return 'product_id';
   }
