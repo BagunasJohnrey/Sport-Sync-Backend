@@ -54,6 +54,17 @@ class ReportModel extends BaseModel {
     }
   }
 
+  async getLatestReport(type) {
+    const query = `
+      SELECT * FROM reports 
+      WHERE report_type = ? 
+      ORDER BY period_start DESC 
+      LIMIT 1
+    `;
+    const results = await this.executeQuery(query, [type]);
+    return results[0] || null;
+  }
+
   getPrimaryKey() {
     return 'report_id';
   }
