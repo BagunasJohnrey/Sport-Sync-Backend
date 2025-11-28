@@ -97,7 +97,18 @@ const reportController = {
       console.error('Backup Controller Error:', error);
       res.status(500).json({ success: false, message: error.message });
     }
+  },
+
+  // method to the reportController object
+  getProfitabilityAnalysis: async (req, res) => {
+    try {
+      const profitabilityData = await productModel.getProductProfitability();
+      res.json({ success: true, data: profitabilityData });
+    } catch (error) {
+      res.status(500).json({ success: false, message: error.message });
+    }
   }
+
 };
 
 module.exports = reportController;

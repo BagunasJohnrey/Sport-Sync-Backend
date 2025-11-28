@@ -150,6 +150,28 @@ class ProductModel extends BaseModel {
     return this.executeQuery(query);
   }
 
+  // Add this method to the ProductModel class
+  async getProductProfitability() {
+    const query = `
+      SELECT 
+        p.product_id,
+        p.product_name,
+        pc.category_name,
+        p.cost_price,
+        p.selling_price,
+        (p.selling_price - p.cost_price) as gross_profit,
+        CASE 
+          WHEN p.selling_price > 0 THEN ((p.selling_price - p.cost_price) / p.selling_price) * 100
+          ELSE 0 
+        END as margin_percent
+      FROM products p
+      LEFT JOIN product_categories pc ON p.category_id = pc.category_id
+      WHERE p.status = 'Active'
+      ORDER BY margin_percent DESC
+    `;
+    return this.executeQuery(query);
+  }
+
   getPrimaryKey() {
     return 'product_id';
   }

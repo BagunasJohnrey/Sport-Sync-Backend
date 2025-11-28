@@ -14,4 +14,7 @@ router.get('/inventory', authMiddleware.requireRole(['Admin', 'Staff']), reportC
 // Backup - Admin Only
 router.get('/backup', authMiddleware.requireRole(['Admin']), reportController.exportDatabase);
 
+// Add this line with the other report routes
+router.get('/profitability', authMiddleware.requireRole(['Admin', 'Staff']), reportController.getProfitabilityAnalysis);
+
 module.exports = router;
