@@ -132,6 +132,95 @@ async getPaymentMethodStats(startDate, endDate) {
   return this.executeQuery(query, [startDate, endDate]);
 }
 
+async getSalesKPIs(startDate, endDate) {
+    const query = `
+      SELECT
+        COALESCE(SUM(total_amount), 0) as total_revenue,
+        COUNT(transaction_id) as total_transactions,
+        COALESCE(AVG(total_amount), 0) as average_transaction_value,
+        (SELECT payment_method FROM transactions
+          WHERE status = 'Completed' AND transaction_date BETWEEN ? AND ?
+          GROUP BY payment_method ORDER BY COUNT(*) DESC LIMIT 1) as top_payment_method
+      FROM transactions
+      WHERE status = 'Completed'
+      AND transaction_date BETWEEN ? AND ?
+    `;
+    const result = await this.executeQuery(query, [startDate, endDate, startDate, endDate]);
+    return result[0];
+  }
+
+  async getSalesTrend(period, startDate, endDate) {
+    let dateFormat;
+    switch(period) {
+      case 'monthly': dateFormat = '%Y-%m'; break;
+      case 'weekly':  dateFormat = '%Y-W%u'; break;
+      default:        dateFormat = '%Y-%m-%d'; // daily
+    }
+    // Updated to return both Revenue (total_amount) and Volume (count)
+    const query = `
+      SELECT
+        DATE_FORMAT(transaction_date, '${dateFormat}') as date_label,
+        SUM(total_amount) as total_revenue,
+        COUNT(*) as total_sales_count
+      FROM transactions
+      WHERE status = 'Completed'
+      AND transaction_date BETWEEN ? AND ?
+      GROUP BY date_label
+      ORDER BY date_label ASC
+    `;
+    return this.executeQuery(query, [startDate, endDate]);
+  }
+
+  async getSalesByCategory(startDate, endDate) {
+    // Updated to return both Revenue (price) and Volume (quantity)
+    const query = `
+      SELECT
+        pc.category_name,
+        SUM(ti.total_price) as total_revenue,
+        SUM(ti.quantity) as total_volume
+      FROM transaction_items ti
+      JOIN products p ON ti.product_id = p.product_id
+      JOIN product_categories pc ON p.category_id = pc.category_id
+      JOIN transactions t ON ti.transaction_id = t.transaction_id
+      WHERE t.status = 'Completed'
+      AND t.transaction_date BETWEEN ? AND ?
+      GROUP BY pc.category_id
+    `;
+    return this.executeQuery(query, [startDate, endDate]);
+  }
+
+  async getPaymentMethodStats(startDate, endDate) {
+    const query = `
+      SELECT
+        payment_method,
+        COUNT(*) as usage_count
+      FROM transactions
+      WHERE status = 'Completed'
+      AND transaction_date BETWEEN ? AND ?
+      GROUP BY payment_method
+    `;
+    return this.executeQuery(query, [startDate, endDate]);
+  }
+
+  // New method for Top 10 Products
+  async getTopSellingProducts(startDate, endDate) {
+    const query = `
+      SELECT
+        p.product_name,
+        SUM(ti.quantity) as total_sold,
+        SUM(ti.total_price) as total_revenue
+      FROM transaction_items ti
+      JOIN products p ON ti.product_id = p.product_id
+      JOIN transactions t ON ti.transaction_id = t.transaction_id
+      WHERE t.status = 'Completed'
+      AND t.transaction_date BETWEEN ? AND ?
+      GROUP BY p.product_id
+      ORDER BY total_sold DESC
+      LIMIT 10
+    `;
+    return this.executeQuery(query, [startDate, endDate]);
+  }
+
   getPrimaryKey() {
     return 'report_id';
   }
