@@ -13,64 +13,58 @@ const authController = {
         return res.status(400).json({ success: false, errors: errors.array() });
 
       const { username, password } = req.body;
-
       const user = await userModel.findByUsername(username);
-      if (!user)
-        return res.status(401).json({ success: false, message: 'Invalid credentials' });
 
-      if (user.status !== 'Active') {
-        return res.status(401).json({ success: false, message: 'Account is inactive.' });
+      if (!user) return res.status(401).json({ success: false, message: 'Invalid credentials' });
+
+      // Check Lockout
+      if (user.lockout_until && new Date(user.lockout_until) > new Date()) {
+        const waitMinutes = Math.ceil((new Date(user.lockout_until) - new Date()) / 60000);
+        return res.status(403).json({ success: false, message: `Account locked. Try again in ${waitMinutes} minutes.` });
       }
 
+      // Verify Password
       const isValidPassword = await userModel.verifyPassword(password, user.password_hash);
-      if (!isValidPassword)
-        return res.status(401).json({ success: false, message: 'Invalid credentials' });
+
+      if (!isValidPassword) {
+        const attempts = (user.failed_login_attempts || 0) + 1;
+        let updateData = { failed_login_attempts: attempts };
+
+        if (attempts >= 5) {
+          const lockTime = new Date(Date.now() + 15 * 60000); // 15 mins lock
+          updateData.lockout_until = lockTime;
+        }
+        await userModel.update(user.user_id, updateData);
+
+        return res.status(401).json({
+          success: false,
+          message: attempts >= 5 ? 'Account locked due to too many failed attempts.' : `Invalid credentials. ${5 - attempts} attempts remaining.`
+        });
+      }
+
+      // Successful Login
+      if (user.failed_login_attempts > 0 || user.lockout_until) {
+        await userModel.update(user.user_id, { failed_login_attempts: 0, lockout_until: null });
+      }
+      if (user.status !== 'Active') return res.status(401).json({ success: false, message: 'Account is inactive.' });
 
       await userModel.updateLastLogin(user.user_id);
-
-      // Audit Log: User Login
-      try {
-        await auditLogModel.logAction(user.user_id, 'LOGIN', 'users', user.user_id);
-      } catch (logError) {
-        console.error('Failed to log login action:', logError);
-      }
+      try { await auditLogModel.logAction(user.user_id, 'LOGIN', 'users', user.user_id); } catch (e) {}
 
       const accessToken = jwt.sign(
-        {
-          user_id: user.user_id,
-          username: user.username,
-          role: user.role,
-          email: user.email
-        },
+        { user_id: user.user_id, username: user.username, role: user.role, email: user.email },
         process.env.JWT_SECRET,
-        { expiresIn: '15m' }
+        { expiresIn: process.env.SESSION_TIMEOUT || '15m' }
       );
 
-      const refreshToken = jwt.sign(
-        { user_id: user.user_id },
-        process.env.REFRESH_TOKEN_SECRET || 'fallback_secret',
-        { expiresIn: '7d' }
-      );
-
-      const refreshExpiresAt = new Date();
-      refreshExpiresAt.setDate(refreshExpiresAt.getDate() + 7);
+      // Refresh token logic
+      const refreshToken = jwt.sign({ user_id: user.user_id }, process.env.REFRESH_TOKEN_SECRET || 'fallback', { expiresIn: '7d' });
+      const refreshExpiresAt = new Date(); refreshExpiresAt.setDate(refreshExpiresAt.getDate() + 7);
       await userModel.storeRefreshToken(user.user_id, refreshToken, refreshExpiresAt);
 
-      res.cookie('refresh_token', refreshToken, {
-        httpOnly: true,
-        secure: true,
-        sameSite: 'None',
-        maxAge: 7 * 24 * 60 * 60 * 1000 
-      });
-
-      const { password_hash, ...userWithoutPassword } = user;
-
-      res.json({
-        success: true,
-        message: 'Login successful',
-        accessToken,
-        user: userWithoutPassword
-      });
+      res.cookie('refresh_token', refreshToken, { httpOnly: true, secure: true, sameSite: 'None', maxAge: 7 * 24 * 3600000 });
+      const { password_hash, ...userSafe } = user;
+      res.json({ success: true, message: 'Login successful', accessToken, user: userSafe });
 
     } catch (error) {
       console.error(error);
