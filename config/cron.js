@@ -4,13 +4,16 @@ const weeklyReportJob = require('../services/scheduler/jobs/weeklyReport');
 const { logScheduler } = require('../utils/schedulerLogger');
 
 const initCron = () => {
+  // 1. ENVIRONMENT CHECK
+  // Prevent the scheduler from running unless explicitly enabled.
+  if (process.env.ENABLE_CRON !== 'true') {
+    console.log('🕒 Scheduler is disabled (ENABLE_CRON is not true).');
+    return;
+  }
+
   console.log('🚀 Initializing Scheduler...');
 
-  // =================================================================
-  // 1. Daily Report Schedule
-  // Timing: 23:59 (11:59 PM) every day
-  // Cron Syntax: Minute(59) Hour(23) Day(*) Month(*) DayOfWeek(*)
-  // =================================================================
+  // 2. Daily Report Schedule (23:59 Daily)
   cron.schedule('59 23 * * *', async () => {
     logScheduler('Daily Report', 'START');
     try {
@@ -22,11 +25,7 @@ const initCron = () => {
     }
   });
 
-  // =================================================================
-  // 2. Weekly Report Schedule
-  // Timing: 23:59 (11:59 PM) every Sunday
-  // Cron Syntax: Minute(59) Hour(23) Day(*) Month(*) DayOfWeek(0=Sun)
-  // =================================================================
+  // 3. Weekly Report Schedule (23:59 Sunday)
   cron.schedule('59 23 * * 0', async () => {
     logScheduler('Weekly Report', 'START');
     try {
