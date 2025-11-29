@@ -4,6 +4,7 @@ const cookieParser = require('cookie-parser');
 require('dotenv').config();
 
 const { connectDB } = require('./db/connection');
+const initCron = require('./config/cron');
 
 // Route imports
 const authRoutes = require('./routes/authRoutes');
@@ -62,7 +63,18 @@ app.use((error, req, res, next) => {
 // Start server
 const startServer = async () => {
   try {
+    // 1. Establish Database Connection
     await connectDB();
+
+    // 2. Initialize Cron Scheduler (ADD THIS BLOCK)
+    try {
+      initCron();
+    } catch (cronError) {
+      // Log error but allow server to continue running
+      console.error('⚠️ Scheduler failed to initialize:', cronError);
+    }
+
+    // 3. Start Listening for Requests
     app.listen(PORT, () => {
       console.log(`Server is running on port ${PORT}`);
       console.log(`Health check: http://localhost:${PORT}/api/health`);
