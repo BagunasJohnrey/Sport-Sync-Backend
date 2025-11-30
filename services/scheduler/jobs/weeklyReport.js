@@ -1,14 +1,24 @@
-/**
- * Weekly Report Worker
- * This function contains the logic to generate the weekly analytics summary.
- */
-const processWeeklyReport = async () => {
-  // 1. Log the start of the process (with a unique prefix/icon for visibility)
-  console.log('📊 [Worker] Processing Weekly Report...');
+// services/scheduler/jobs/weeklyReport.js
+const reportGenerator = require('../../reportGenerator');
+const reportModel = require('../../../models/reportModel');
+const { logScheduler } = require('../../../utils/schedulerLogger');
 
-  // 2. Simulate processing time
-  // In the future, this will be replaced by complex aggregation queries.
-  return new Promise(resolve => setTimeout(resolve, 500));
+const processWeeklyReport = async () => {
+  logScheduler('Weekly Report', 'START');
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    
+    const reportPayload = await reportGenerator.generateWeeklyStats(today);
+    reportPayload.generated_by = 1;
+
+    const savedResult = await reportModel.saveReport(reportPayload);
+    
+    console.log(`✅ Weekly Report Saved: ID ${savedResult.report_id}`);
+    logScheduler('Weekly Report', 'SUCCESS');
+  } catch (error) {
+    console.error('❌ Weekly Report Error:', error);
+    logScheduler('Weekly Report', 'ERROR');
+  }
 };
 
 module.exports = processWeeklyReport;
