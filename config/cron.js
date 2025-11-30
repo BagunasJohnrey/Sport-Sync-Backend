@@ -1,6 +1,7 @@
 const cron = require('node-cron');
 const dailyReportJob = require('../services/scheduler/jobs/dailyReport');
 const weeklyReportJob = require('../services/scheduler/jobs/weeklyReport');
+const monthlyReportJob = require('../services/scheduler/jobs/monthlyReport'); 
 const { logScheduler } = require('../utils/schedulerLogger');
 
 const initCron = () => {
@@ -37,5 +38,18 @@ const initCron = () => {
     }
   });
 };
+
+// Monthly: 1st day of month at 00:00
+  cron.schedule('0 0 1 * *', async () => {
+    logScheduler('Monthly Report', 'START');
+    try {
+      await monthlyReportJob();
+      logScheduler('Monthly Report', 'SUCCESS');
+    } catch (error) {
+      console.error('❌ Monthly Report Failed:', error);
+      logScheduler('Monthly Report', 'ERROR');
+    }
+  });
+
 
 module.exports = initCron;
