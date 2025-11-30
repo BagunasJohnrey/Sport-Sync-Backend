@@ -17,4 +17,6 @@ router.get('/backup', authMiddleware.requireRole(['Admin']), reportController.ex
 // Add this line with the other report routes
 router.get('/profitability', authMiddleware.requireRole(['Admin', 'Staff']), reportController.getProfitabilityAnalysis);
 
+// routes/reportRoutes.js
+router.get('/download', authMiddleware.requireRole(['Admin', 'Staff']), reportController.downloadReport);
 module.exports = router;
