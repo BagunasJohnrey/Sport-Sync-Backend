@@ -1,6 +1,7 @@
 const productModel = require('../models/productModel');
 const auditLogModel = require('../models/auditLogModel');
 const { validationResult } = require('express-validator');
+const { notifyUser } = require('../services/notificationService');
 
 const productController = {
   // Updated getAllProducts method
@@ -259,6 +260,23 @@ const productController = {
       }
 
       const result = await productModel.updateStock(productId, quantity, userId, change_type);
+
+      try {
+  const products = await productModel.executeQuery('SELECT * FROM products WHERE product_id = ?', [productId]);
+  const updatedProduct = products[0];
+
+  if (updatedProduct && updatedProduct.quantity <= updatedProduct.reorder_level) {
+    // Notify User ID 1 (Admin) - You can change '1' to a dynamic admin ID later
+    await notifyUser(
+      1, 
+      `Low Stock Alert: ${updatedProduct.product_name} is down to ${updatedProduct.quantity} units.`,
+      'LOW_STOCK',
+      updatedProduct.product_id
+    );
+  }
+} catch (err) {
+  console.error('Failed to trigger notification:', err);
+}
 
       // Audit Log: Update Stock (Manual Adjustment)
       try {
