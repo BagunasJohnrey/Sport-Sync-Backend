@@ -1,5 +1,6 @@
 const transactionModel = require('../models/transactionModel');
 const { validationResult } = require('express-validator');
+const { notifyUser } = require('../services/notificationService');
 
 const transactionController = {
   // Get all transactions
@@ -102,6 +103,24 @@ const transactionController = {
       }
 
       const { user_id, payment_method, total_amount, amount_paid, change_due, remarks, items } = req.body;
+
+      items.forEach(async (item) => {
+  try {
+    const products = await transactionModel.executeQuery('SELECT * FROM products WHERE product_id = ?', [item.product_id]);
+    const product = products[0];
+    
+    if (product && product.quantity <= product.reorder_level) {
+       await notifyUser(
+         1, // Admin ID
+         `Urgent: Stock for ${product.product_name} dropped to ${product.quantity} after a sale.`,
+         'SALES',
+         product.product_id
+       );
+    }
+  } catch (err) {
+    console.error('Notification trigger failed', err);
+  }
+});
 
       // Validate items
       if (!items || !Array.isArray(items) || items.length === 0) {
