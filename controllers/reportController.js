@@ -3,6 +3,9 @@ const productModel = require('../models/productModel');
 const { exec } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const { generatePDF } = require('../services/pdfService');
+const { generateExcel } = require('../services/excelService');
+
 
 const reportController = {
   // 1. Sales Dashboard Analytics
@@ -110,5 +113,32 @@ const reportController = {
   }
 
 };
+
+// 4. Download Report
+  downloadReport: async (req, res) => {
+    try {
+      const { id, format } = req.query; // format = 'pdf' or 'excel'
+      const report = await reportModel.findById(id);
+
+      if (!report) return res.status(404).json({ message: 'Report not found' });
+
+      // Parse JSON data if stringified
+      if (typeof report.data === 'string') {
+        report.data = JSON.parse(report.data);
+      }
+
+      if (format === 'pdf') {
+        return generatePDF(report, res);
+      } else if (format === 'excel') {
+        return generateExcel(report, res);
+      } else {
+        return res.status(400).json({ message: 'Invalid format. Use pdf or excel.' });
+      }
+
+    } catch (error) {
+      console.error('Download Error:', error);
+      res.status(500).json({ message: 'Download failed' });
+    }
+  };
 
 module.exports = reportController;
