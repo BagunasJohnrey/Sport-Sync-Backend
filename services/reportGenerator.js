@@ -47,6 +47,42 @@ class reportGenerator {
     };
   }
 
+    
+  async generateWeeklyStats(endDateStr) {
+    // Calculate start date (7 days ago)
+    const end = new Date(endDateStr);
+    const start = new Date(end);
+    start.setDate(start.getDate() - 6);
+    const startDateStr = start.toISOString().split('T')[0];
+
+    const query = `
+      SELECT 
+        COUNT(DISTINCT t.transaction_id) as total_transactions,
+        SUM(t.total_amount) as total_revenue,
+        SUM(ti.quantity) as items_sold
+      FROM transactions t
+      JOIN transaction_items ti ON t.transaction_id = ti.transaction_id
+      WHERE DATE(t.transaction_date) BETWEEN ? AND ? 
+      AND t.status = 'Completed'
+    `;
+
+    const [stats] = await this.pool.execute(query, [startDateStr, endDateStr]);
+    const result = stats[0];
+
+    return {
+      report_type: 'Weekly',
+      period_start: startDateStr,
+      period_end: endDateStr,
+      total_sales: parseFloat(result.total_revenue || 0),
+      total_transactions: parseInt(result.total_transactions || 0),
+      data: {
+        metrics: {
+          items_sold: parseInt(result.items_sold || 0)
+        }
+      }
+    };
+  }
+
   async generateMonthlyStats(monthStr) {
     // monthStr format: 'YYYY-MM'
     const query = `
