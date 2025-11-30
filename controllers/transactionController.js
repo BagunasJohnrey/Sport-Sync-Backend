@@ -1,6 +1,7 @@
 const transactionModel = require('../models/transactionModel');
 const { validationResult } = require('express-validator');
 const { notifyUser } = require('../services/notificationService');
+const { generateReceiptPDF } = require('../services/receiptService');
 
 const transactionController = {
   // Get all transactions
@@ -298,7 +299,20 @@ getSalesReport: async (req, res) => {
       message: error.message
     });
   }
-}
+},
+
+
+downloadReceipt: async (req, res) => {
+    try {
+      const transaction = await transactionModel.getTransactionWithItems(req.params.id);
+      if (!transaction) return res.status(404).json({ message: 'Transaction not found' });
+      
+      generateReceiptPDF(transaction, res);
+    } catch (error) {
+      res.status(500).json({ message: error.message });
+    }
+  }
+
 };
 
 module.exports = transactionController;

@@ -31,6 +31,11 @@ router.get('/:id',
   transactionController.getTransactionById
 );
 
+router.get('/:id/receipt',
+   authMiddleware.requireRole(['Admin', 'Cashier']),
+    transactionController.downloadReceipt
+  );
+
 // POS / Create Transaction - Admin & Cashier (Staff cannot use POS)
 router.post('/', 
   authMiddleware.requireRole(['Admin', 'Cashier']), 
