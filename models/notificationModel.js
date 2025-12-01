@@ -42,7 +42,7 @@ class NotificationModel extends BaseModel {
       user_id: data.userId,
       message: data.message,
       type: data.type || 'SYSTEM',
-      related_id: data.relatedId || null, // This now matches your new DB column
+      related_id: data.relatedId || null, // This line requires the DB column to exist
       status: 'Unread',
       created_at: new Date()
     });
