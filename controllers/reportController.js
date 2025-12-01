@@ -110,11 +110,9 @@ const reportController = {
     } catch (error) {
       res.status(500).json({ success: false, message: error.message });
     }
-  }
+  },
 
-};
-
-// 4. Download Report
+  // 4. Download Report (MOVED INSIDE THE EXPORTED OBJECT)
   downloadReport: async (req, res) => {
     try {
       const { id, format } = req.query; // format = 'pdf' or 'excel'
@@ -139,6 +137,8 @@ const reportController = {
       console.error('Download Error:', error);
       res.status(500).json({ message: 'Download failed' });
     }
-  };
+  }
+
+};
 
 module.exports = reportController;
