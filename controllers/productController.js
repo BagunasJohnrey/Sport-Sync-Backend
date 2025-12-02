@@ -1,4 +1,5 @@
 const productModel = require('../models/productModel');
+const userModel = require('../models/userModel'); // 1. ADDED THIS IMPORT
 const auditLogModel = require('../models/auditLogModel');
 const { validationResult } = require('express-validator');
 const { notifyUser } = require('../services/notificationService');
@@ -250,51 +251,45 @@ const productController = {
     try {
       const productId = req.params.id;
       const { quantity, change_type = 'Adjustment' } = req.body;
-      const userId = req.user?.user_id || 1; // In real app, get from auth middleware
+      const userId = req.user?.user_id || 1;
 
       if (quantity === undefined || quantity < 0) {
-        return res.status(400).json({
-          success: false,
-          message: 'Valid quantity is required'
-        });
+        return res.status(400).json({ success: false, message: 'Valid quantity is required' });
       }
 
       const result = await productModel.updateStock(productId, quantity, userId, change_type);
 
       try {
-  const products = await productModel.executeQuery('SELECT * FROM products WHERE product_id = ?', [productId]);
-  const updatedProduct = products[0];
+        const products = await productModel.executeQuery('SELECT * FROM products WHERE product_id = ?', [productId]);
+        const updatedProduct = products[0];
 
-  if (updatedProduct && updatedProduct.quantity <= updatedProduct.reorder_level) {
-    // Notify User ID 1 (Admin) - You can change '1' to a dynamic admin ID later
-    await notifyUser(
-      1, 
-      `Low Stock Alert: ${updatedProduct.product_name} is down to ${updatedProduct.quantity} units.`,
-      'LOW_STOCK',
-      updatedProduct.product_id
-    );
-  }
-} catch (err) {
-  console.error('Failed to trigger notification:', err);
-}
+        if (updatedProduct && updatedProduct.quantity <= updatedProduct.reorder_level) {
+          // Broadcast to ALL users
+          const allUsers = await userModel.findAll();
 
-      // Audit Log: Update Stock (Manual Adjustment)
+          for (const user of allUsers) {
+              await notifyUser(
+                  user.user_id, 
+                  `Low Stock Alert: ${updatedProduct.product_name} is down to ${updatedProduct.quantity} units.`,
+                  'LOW_STOCK',
+                  updatedProduct.product_id
+              );
+          }
+        }
+      } catch (err) {
+        console.error('Failed to trigger notification:', err);
+      }
+
+      // Audit Log
       try {
         await auditLogModel.logAction(userId, 'UPDATE_STOCK', 'products', productId);
       } catch (auditError) {
         console.error('Failed to log stock update action:', auditError);
       }
 
-      res.json({
-        success: true,
-        message: 'Stock updated successfully',
-        data: result
-      });
+      res.json({ success: true, message: 'Stock updated successfully', data: result });
     } catch (error) {
-      res.status(500).json({
-        success: false,
-        message: error.message
-      });
+      res.status(500).json({ success: false, message: error.message });
     }
   },
 

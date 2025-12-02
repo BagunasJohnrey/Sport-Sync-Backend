@@ -1,4 +1,5 @@
 const transactionModel = require('../models/transactionModel');
+const userModel = require('../models/userModel'); // 1. ADDED IMPORT
 const { validationResult } = require('express-validator');
 const { notifyUser } = require('../services/notificationService');
 const { generateReceiptPDF } = require('../services/receiptService');
@@ -92,91 +93,72 @@ const transactionController = {
     }
   },
 
-  // Create new transaction - FIXED VERSION
+  // Create new transaction
   createTransaction: async (req, res) => {
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
-        return res.status(400).json({
-          success: false,
-          errors: errors.array()
-        });
+        return res.status(400).json({ success: false, errors: errors.array() });
       }
 
       const { user_id, payment_method, total_amount, amount_paid, change_due, remarks, items } = req.body;
 
-      items.forEach(async (item) => {
-  try {
-    const products = await transactionModel.executeQuery('SELECT * FROM products WHERE product_id = ?', [item.product_id]);
-    const product = products[0];
-    
-    if (product && product.quantity <= product.reorder_level) {
-       await notifyUser(
-         1, // Admin ID
-         `Urgent: Stock for ${product.product_name} dropped to ${product.quantity} after a sale.`,
-         'SALES',
-         product.product_id
-       );
-    }
-  } catch (err) {
-    console.error('Notification trigger failed', err);
-  }
-});
-
-      // Validate items
       if (!items || !Array.isArray(items) || items.length === 0) {
-        return res.status(400).json({
-          success: false,
-          message: 'Transaction must have at least one item'
-        });
+        return res.status(400).json({ success: false, message: 'Transaction must have at least one item' });
       }
 
-      console.log('🔍 Validating products for transaction...');
-      
-      // Validate stock availability - FIXED
+      // Check stock availability
       for (const item of items) {
-        console.log(`Checking product ID: ${item.product_id}`);
-        
         const products = await transactionModel.executeQuery(
           'SELECT product_id, quantity, product_name FROM products WHERE product_id = ?',
           [item.product_id]
         );
         
-        console.log(`Query result for product ${item.product_id}:`, products);
-        
-        // FIX: Check if products array is empty, not products[0]
         if (products.length === 0) {
-          return res.status(400).json({
-            success: false,
-            message: `Product with ID ${item.product_id} not found`
-          });
+          return res.status(400).json({ success: false, message: `Product ID ${item.product_id} not found` });
         }
         
         const product = products[0];
-        
         if (product.quantity < item.quantity) {
           return res.status(400).json({
             success: false,
             message: `Insufficient stock for ${product.product_name}. Available: ${product.quantity}`
           });
         }
-        
-        console.log(`✅ Product ${product.product_name} available: ${product.quantity}`);
       }
 
-      const transactionData = {
-        user_id,
-        payment_method,
-        total_amount,
-        amount_paid,
-        change_due: change_due || 0,
-        remarks
-      };
-
-      console.log('🔄 Creating transaction...');
+      // Create Transaction
+      const transactionData = { user_id, payment_method, total_amount, amount_paid, change_due: change_due || 0, remarks };
       const transactionId = await transactionModel.createTransaction(transactionData, items);
       
-      console.log('📦 Fetching transaction details...');
+      // === NOTIFY ALL USERS ===
+      const allUsers = await userModel.findAll(); // Fetch EVERY user in the system
+
+      for (const item of items) {
+        try {
+          const products = await transactionModel.executeQuery(
+            'SELECT product_name, quantity, reorder_level FROM products WHERE product_id = ?', 
+            [item.product_id]
+          );
+          const product = products[0];
+          
+          // Check low stock condition
+          if (product && product.quantity <= product.reorder_level) {
+             // Broadcast to ALL users
+             for (const user of allUsers) {
+               await notifyUser(
+                 user.user_id, 
+                 `Urgent: Stock for ${product.product_name} dropped to ${product.quantity} after a sale.`,
+                 'LOW_STOCK',
+                 item.product_id
+               );
+             }
+          }
+        } catch (err) {
+          console.error('Notification trigger failed:', err);
+        }
+      }
+
       const newTransaction = await transactionModel.getTransactionWithItems(transactionId);
       
       res.status(201).json({
@@ -184,12 +166,10 @@ const transactionController = {
         message: 'Transaction completed successfully',
         data: newTransaction
       });
+
     } catch (error) {
-      console.error('❌ Transaction error:', error);
-      res.status(500).json({
-        success: false,
-        message: error.message
-      });
+      console.error('Transaction error:', error);
+      res.status(500).json({ success: false, message: error.message });
     }
   },
 
@@ -222,87 +202,76 @@ const transactionController = {
   },
 
   // Get sales report
-  // Get sales report - FIXED VERSION
-getSalesReport: async (req, res) => {
-  try {
-    const { start_date, end_date } = req.query;
-    
-    if (!start_date || !end_date) {
-      return res.status(400).json({
+  getSalesReport: async (req, res) => {
+    try {
+      const { start_date, end_date } = req.query;
+      
+      if (!start_date || !end_date) {
+        return res.status(400).json({
+          success: false,
+          message: 'Start date and end date are required'
+        });
+      }
+  
+      console.log(`📊 Generating sales report for ${start_date} to ${end_date}`);
+  
+      const reportQuery = `
+        SELECT 
+          DATE(t.transaction_date) as date,
+          COUNT(*) as transaction_count,
+          SUM(t.total_amount) as total_sales,
+          SUM(ti.quantity) as total_items_sold
+        FROM transactions t
+        LEFT JOIN transaction_items ti ON t.transaction_id = ti.transaction_id
+        WHERE DATE(t.transaction_date) BETWEEN ? AND ?
+        GROUP BY DATE(t.transaction_date)
+        ORDER BY date
+      `;
+      
+      const dailySales = await transactionModel.executeQuery(reportQuery, [start_date, end_date]);
+      
+      const topProductsQuery = `
+        SELECT 
+          p.product_id,
+          p.product_name,
+          SUM(ti.quantity) as total_quantity,
+          SUM(ti.total_price) as total_revenue
+        FROM transaction_items ti
+        LEFT JOIN products p ON ti.product_id = p.product_id
+        LEFT JOIN transactions t ON ti.transaction_id = t.transaction_id
+        WHERE DATE(t.transaction_date) BETWEEN ? AND ?
+        GROUP BY p.product_id, p.product_name
+        ORDER BY total_quantity DESC
+        LIMIT 10
+      `;
+      
+      const topProducts = await transactionModel.executeQuery(topProductsQuery, [start_date, end_date]);
+      
+      const summary = {
+        total_transactions: dailySales.reduce((sum, day) => sum + (day.transaction_count || 0), 0),
+        total_sales: dailySales.reduce((sum, day) => sum + parseFloat(day.total_sales || 0), 0),
+        total_items_sold: dailySales.reduce((sum, day) => sum + parseInt(day.total_items_sold || 0), 0)
+      };
+  
+      res.json({
+        success: true,
+        data: {
+          period: { start_date, end_date },
+          daily_sales: dailySales,
+          top_products: topProducts,
+          summary: summary
+        }
+      });
+    } catch (error) {
+      console.error('❌ Sales report error:', error);
+      res.status(500).json({
         success: false,
-        message: 'Start date and end date are required'
+        message: error.message
       });
     }
+  },
 
-    console.log(`📊 Generating sales report for ${start_date} to ${end_date}`);
-
-    // FIXED: Better date handling and removed status filter temporarily for debugging
-    const reportQuery = `
-      SELECT 
-        DATE(t.transaction_date) as date,
-        COUNT(*) as transaction_count,
-        SUM(t.total_amount) as total_sales,
-        SUM(ti.quantity) as total_items_sold
-      FROM transactions t
-      LEFT JOIN transaction_items ti ON t.transaction_id = ti.transaction_id
-      WHERE DATE(t.transaction_date) BETWEEN ? AND ?
-      GROUP BY DATE(t.transaction_date)
-      ORDER BY date
-    `;
-    
-    const dailySales = await transactionModel.executeQuery(reportQuery, [start_date, end_date]);
-    
-    console.log('Daily sales data:', dailySales);
-
-    // Top products - FIXED
-    const topProductsQuery = `
-      SELECT 
-        p.product_id,
-        p.product_name,
-        SUM(ti.quantity) as total_quantity,
-        SUM(ti.total_price) as total_revenue
-      FROM transaction_items ti
-      LEFT JOIN products p ON ti.product_id = p.product_id
-      LEFT JOIN transactions t ON ti.transaction_id = t.transaction_id
-      WHERE DATE(t.transaction_date) BETWEEN ? AND ?
-      GROUP BY p.product_id, p.product_name
-      ORDER BY total_quantity DESC
-      LIMIT 10
-    `;
-    
-    const topProducts = await transactionModel.executeQuery(topProductsQuery, [start_date, end_date]);
-    
-    console.log('Top products:', topProducts);
-
-    // Calculate summary - FIXED to handle no data case
-    const summary = {
-      total_transactions: dailySales.reduce((sum, day) => sum + (day.transaction_count || 0), 0),
-      total_sales: dailySales.reduce((sum, day) => sum + parseFloat(day.total_sales || 0), 0),
-      total_items_sold: dailySales.reduce((sum, day) => sum + parseInt(day.total_items_sold || 0), 0)
-    };
-
-    console.log('Summary:', summary);
-
-    res.json({
-      success: true,
-      data: {
-        period: { start_date, end_date },
-        daily_sales: dailySales,
-        top_products: topProducts,
-        summary: summary
-      }
-    });
-  } catch (error) {
-    console.error('❌ Sales report error:', error);
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
-  }
-},
-
-
-downloadReceipt: async (req, res) => {
+  downloadReceipt: async (req, res) => {
     try {
       const transaction = await transactionModel.getTransactionWithItems(req.params.id);
       if (!transaction) return res.status(404).json({ message: 'Transaction not found' });
@@ -312,7 +281,6 @@ downloadReceipt: async (req, res) => {
       res.status(500).json({ message: error.message });
     }
   }
-
 };
 
 module.exports = transactionController;
