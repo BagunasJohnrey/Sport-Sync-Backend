@@ -137,8 +137,40 @@ const reportController = {
       console.error('Download Error:', error);
       res.status(500).json({ message: 'Download failed' });
     }
-  }
+  },
+
+  // Date filtering
+  getReportHistory: async (req, res) => {
+    try {
+      const { type, limit = 20, start_date, end_date } = req.query;
+      
+      let query = 'SELECT report_id, report_type, period_start, period_end, created_at, generated_by FROM reports WHERE 1=1';
+      const params = [];
+
+      if (type) {
+        query += ' AND report_type = ?';
+        params.push(type);
+      }
+
+      // NEW: Date Filtering
+      if (start_date && end_date) {
+         query += ' AND period_start BETWEEN ? AND ?';
+         params.push(start_date, end_date);
+      }
+
+      query += ' ORDER BY period_start DESC LIMIT ?';
+      params.push(parseInt(limit));
+
+      const reports = await reportModel.executeQuery(query, params);
+      res.json({ success: true, data: reports });
+    } catch (error) {
+      console.error("Report History Error:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  },
 
 };
+
+
 
 module.exports = reportController;
