@@ -5,15 +5,18 @@ const bcrypt = require('bcryptjs');
 
 const userController = {
   // Get all users
-  getAllUsers: async (req, res) => {
+getAllUsers: async (req, res) => {
     try {
-      const { page = 1, limit = 10, role, status } = req.query;
+
+      const { page = 1, limit = 10, role, status, search } = req.query;
       const offset = (page - 1) * limit;
       
       let conditions = {};
-      if (role) conditions.role = role;
-      if (status) conditions.status = status;
+      if (role && role !== 'all') conditions.role = role;
+      if (status && status !== 'all') conditions.status = status;
+      if (search) conditions.search = search; 
       
+
       const users = await userModel.findAll(conditions, parseInt(limit), offset);
       
       res.json({
@@ -22,7 +25,7 @@ const userController = {
         pagination: {
           page: parseInt(page),
           limit: parseInt(limit),
-          total: users.length
+          total: users.length 
         }
       });
     } catch (error) {
@@ -32,7 +35,6 @@ const userController = {
       });
     }
   },
-
   // Get user by ID
   getUserById: async (req, res) => {
     try {
