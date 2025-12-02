@@ -4,25 +4,35 @@ const { validationResult } = require('express-validator');
 const bcrypt = require('bcryptjs');
 
 const userController = {
-  // Get all users
+  // Get all users (MODIFIED FOR DYNAMIC SEARCH)
   getAllUsers: async (req, res) => {
     try {
-      const { page = 1, limit = 10, role, status } = req.query;
-      const offset = (page - 1) * limit;
+      // Added 'search' to destructuring
+      const { page = 1, limit = 10, role, status, search } = req.query; 
+      const parsedLimit = parseInt(limit);
+      const parsedPage = parseInt(page);
+      const offset = (parsedPage - 1) * parsedLimit;
       
       let conditions = {};
       if (role) conditions.role = role;
       if (status) conditions.status = status;
+      if (search) conditions.search = search; // Pass search term to the model
+
+      // Fetch all matching users (filtered and searched) using the new model method
+      const allMatchingUsers = await userModel.findAllUsersWithSearch(conditions); 
       
-      const users = await userModel.findAll(conditions, parseInt(limit), offset);
-      
+      // Manual pagination
+      const paginatedUsers = allMatchingUsers.slice(offset, offset + parsedLimit);
+      const total = allMatchingUsers.length;
+
       res.json({
         success: true,
-        data: users,
+        data: paginatedUsers,
         pagination: {
-          page: parseInt(page),
-          limit: parseInt(limit),
-          total: users.length
+          page: parsedPage,
+          limit: parsedLimit,
+          total: total,
+          totalPages: Math.ceil(total / parsedLimit)
         }
       });
     } catch (error) {
