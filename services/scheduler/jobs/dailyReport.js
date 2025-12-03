@@ -1,11 +1,11 @@
-// services/scheduler/jobs/dailyReport.js
 const reportGenerator = require('../../reportGenerator');
 const reportModel = require('../../../models/reportModel');
 const { logScheduler } = require('../../../utils/schedulerLogger');
+const { notifyRole } = require('../../notificationService'); 
 
 const processDailyReport = async () => {
   logScheduler('Daily Report', 'START');
-  
+   
   try {
     // 1. Get Today's Date in YYYY-MM-DD
     const today = new Date().toISOString().split('T')[0];
@@ -19,6 +19,14 @@ const processDailyReport = async () => {
 
     // 4. Save to Database
     const savedResult = await reportModel.saveReport(reportPayload);
+
+    // --- NOTIFICATION: Report Generated ---
+    await notifyRole(
+      'Admin', 
+      `Daily Report for ${today} has been generated successfully.`, 
+      'SYSTEM', 
+      savedResult.report_id
+    );
 
     console.log(`✅ Daily Report Saved: ID ${savedResult.report_id}`);
     logScheduler('Daily Report', 'SUCCESS');

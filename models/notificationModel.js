@@ -62,6 +62,13 @@ class NotificationModel extends BaseModel {
     );
   }
 
+  async deleteAllForUser(userId) {
+    return this.executeQuery(
+      'DELETE FROM notifications WHERE user_id = ?',
+      [userId]
+    );
+  }
+
   getPrimaryKey() {
     return 'notification_id';
   }
