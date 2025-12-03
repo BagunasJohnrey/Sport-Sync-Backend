@@ -1,38 +1,34 @@
 const reportModel = require('../models/reportModel');
 const productModel = require('../models/productModel');
-const { exec } = require('child_process');
-const path = require('path');
-const fs = require('fs');
+// 1. Import pool directly to run raw queries for backup
+const { pool } = require('../db/connection'); 
 const { generatePDF } = require('../services/pdfService');
 const { generateExcel } = require('../services/excelService');
-
 
 const reportController = {
   // 1. Sales Dashboard Analytics
   getDashboardAnalytics: async (req, res) => {
     try {
       const { start_date, end_date, period = 'daily' } = req.query;
-      // Default to today if no end_date, and 30 days ago if no start_date
       const end = end_date || new Date().toISOString().split('T')[0];
       const start = start_date || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
-      // Fetch all required data in parallel
       const [kpis, trend, byCategory, paymentMethods, topProducts] = await Promise.all([
         reportModel.getSalesKPIs(start, end),
         reportModel.getSalesTrend(period, start, end),
         reportModel.getSalesByCategory(start, end),
         reportModel.getPaymentMethodStats(start, end),
-        reportModel.getTopSellingProducts(start, end) // Added: Fetch Top 10 Products
+        reportModel.getTopSellingProducts(start, end)
       ]);
 
       res.json({
         success: true,
         data: {
           summary: kpis,
-          sales_trend: trend,        // Contains both revenue and volume data now
-          sales_by_category: byCategory, // Contains both revenue and volume data now
+          sales_trend: trend,
+          sales_by_category: byCategory,
           payment_methods: paymentMethods,
-          top_products: topProducts  // Added: Top 10 products list
+          top_products: topProducts
         }
       });
     } catch (error) {
@@ -64,45 +60,75 @@ const reportController = {
     }
   },
 
-  // 3. Database Backup
+  // 3. Database Backup 
   exportDatabase: async (req, res) => {
+    let connection;
     try {
-      const backupDir = path.join(__dirname, '../backups');
-      if (!fs.existsSync(backupDir)) {
-        fs.mkdirSync(backupDir, { recursive: true });
-      }
+      connection = await pool.getConnection();
+      let dumpContent = "-- SportSync Database Backup\n";
+      dumpContent += `-- Generated: ${new Date().toISOString()}\n\n`;
+      dumpContent += "SET FOREIGN_KEY_CHECKS=0;\n\n";
+
+      // 1. Get all tables
+      const [tables] = await connection.query('SHOW TABLES');
       
-      const fileName = `backup_${new Date().toISOString().replace(/[:.]/g, '-')}.sql`;
-      const filePath = path.join(backupDir, fileName);
+      // The key in the result object depends on DB name, so we grab the first value
+      const tableKey = Object.keys(tables[0])[0];
 
-      // Construct mysqldump command
-      // Note: Ensure mysqldump is in your system path or provide full path
-      const cmd = `mysqldump -u ${process.env.DB_USER} --password=${process.env.DB_PASSWORD} --host=${process.env.DB_HOST} ${process.env.DB_NAME} > "${filePath}"`;
+      for (const tableRow of tables) {
+        const tableName = tableRow[tableKey];
 
-      exec(cmd, (error, stdout, stderr) => {
-        if (error) {
-          console.error('Backup generation error:', error);
-          return res.status(500).json({ success: false, message: 'Backup generation failed' });
-        }
+        // 2. Get Create Table Statement
+        const [createResult] = await connection.query(`SHOW CREATE TABLE \`${tableName}\``);
+        const createSQL = createResult[0]['Create Table'];
+
+        dumpContent += `-- Structure for table \`${tableName}\`\n`;
+        dumpContent += `DROP TABLE IF EXISTS \`${tableName}\`;\n`;
+        dumpContent += `${createSQL};\n\n`;
+
+        // 3. Get Table Data
+        const [rows] = await connection.query(`SELECT * FROM \`${tableName}\``);
         
-        // Send file to client
-        res.download(filePath, fileName, (err) => {
-          if (err) {
-            console.error('File download error:', err);
-            // Don't try to send another response here as headers may be sent
-          }
-          
-          // Optional: Delete backup file after download to save space
-          // fs.unlink(filePath, (unlinkErr) => { if(unlinkErr) console.error(unlinkErr); });
-        });
-      });
+        if (rows.length > 0) {
+            dumpContent += `-- Data for table \`${tableName}\`\n`;
+            
+            // Get column names
+            const columns = Object.keys(rows[0]).map(col => `\`${col}\``).join(', ');
+            
+            // Format values
+            const values = rows.map(row => {
+                const rowValues = Object.values(row).map(val => {
+                    if (val === null) return 'NULL';
+                    if (typeof val === 'number') return val;
+                    if (val instanceof Date) return `'${val.toISOString().slice(0, 19).replace('T', ' ')}'`;
+                    // Escape single quotes for SQL
+                    return `'${String(val).replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
+                }).join(', ');
+                return `(${rowValues})`;
+            }).join(',\n');
+
+            dumpContent += `INSERT INTO \`${tableName}\` (${columns}) VALUES \n${values};\n\n`;
+        }
+      }
+
+      dumpContent += "SET FOREIGN_KEY_CHECKS=1;\n";
+
+      const fileName = `backup_${new Date().toISOString().slice(0,10).replace(/-/g, '')}.sql`;
+      
+      // Send file download headers
+      res.setHeader('Content-Type', 'application/octet-stream');
+      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+      res.send(dumpContent);
+
     } catch (error) {
-      console.error('Backup Controller Error:', error);
-      res.status(500).json({ success: false, message: error.message });
+      console.error('Backup Generation Error:', error);
+      res.status(500).json({ success: false, message: 'Backup generation failed: ' + error.message });
+    } finally {
+      if (connection) connection.release();
     }
   },
 
-  // method to the reportController object
+  // 4. Profitability Analysis
   getProfitabilityAnalysis: async (req, res) => {
     try {
       const profitabilityData = await productModel.getProductProfitability();
@@ -112,7 +138,7 @@ const reportController = {
     }
   },
 
-  // 4. Download Report (MOVED INSIDE THE EXPORTED OBJECT)
+  // 5. Download Report
   downloadReport: async (req, res) => {
     try {
       const { id, format } = req.query; // format = 'pdf' or 'excel'
@@ -120,7 +146,6 @@ const reportController = {
 
       if (!report) return res.status(404).json({ message: 'Report not found' });
 
-      // Parse JSON data if stringified
       if (typeof report.data === 'string') {
         report.data = JSON.parse(report.data);
       }
@@ -138,7 +163,6 @@ const reportController = {
       res.status(500).json({ message: 'Download failed' });
     }
   }
-
 };
 
 module.exports = reportController;

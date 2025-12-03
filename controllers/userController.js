@@ -42,7 +42,6 @@ const userController = {
       });
     }
   },
-
   // Get user by ID
   getUserById: async (req, res) => {
     try {
