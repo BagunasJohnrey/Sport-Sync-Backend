@@ -42,6 +42,16 @@ const notificationController = {
     } catch (error) {
       res.status(500).json({ success: false, message: error.message });
     }
+  },
+
+  clearAll: async (req, res) => {
+    try {
+      const userId = req.user.user_id;
+      await notificationModel.deleteAllForUser(userId);
+      res.json({ success: true, message: 'All notifications cleared' });
+    } catch (error) {
+      res.status(500).json({ success: false, message: error.message });
+    }
   }
 };
 

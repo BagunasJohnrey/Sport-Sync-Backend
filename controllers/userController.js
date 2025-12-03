@@ -2,6 +2,7 @@ const userModel = require('../models/userModel');
 const auditLogModel = require('../models/auditLogModel');
 const { validationResult } = require('express-validator');
 const bcrypt = require('bcryptjs');
+const { notifyRole } = require('../services/notificationService');
 
 const userController = {
   // Get all users
@@ -112,6 +113,14 @@ getAllUsers: async (req, res) => {
       } catch (auditError) {
         console.error('Failed to log create user action:', auditError);
       }
+
+      // --- NOTIFICATION: New User Registered ---
+      await notifyRole(
+        'Admin', 
+        `New user account created: ${username} (${role})`, 
+        'SYSTEM', 
+        newUser.id
+      );
 
       // Remove password hash from response
       const { password_hash, ...userResponse } = newUser;

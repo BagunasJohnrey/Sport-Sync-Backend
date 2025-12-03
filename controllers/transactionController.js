@@ -2,7 +2,7 @@ const transactionModel = require('../models/transactionModel');
 const userModel = require('../models/userModel');
 const settingModel = require('../models/settingModel'); 
 const { validationResult } = require('express-validator');
-const { notifyUser } = require('../services/notificationService');
+const { notifyRole, notifyUser } = require('../services/notificationService');
 const { generateReceiptPDF } = require('../services/receiptService');
 
 const transactionController = {
@@ -96,104 +96,111 @@ const transactionController = {
 
   // Create new transaction
   createTransaction: async (req, res) => {
-    try {
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return res.status(400).json({ success: false, errors: errors.array() });
-      }
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ success: false, errors: errors.array() });
+      }
 
-      const { user_id, payment_method, total_amount, amount_paid, change_due, remarks, items } = req.body;
+      const { user_id, payment_method, total_amount, amount_paid, change_due, remarks, items } = req.body;
 
-      if (!items || !Array.isArray(items) || items.length === 0) {
-        return res.status(400).json({ success: false, message: 'Transaction must have at least one item' });
-      }
+      // Validate items
+      if (!items || !Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ success: false, message: 'Transaction must have at least one item' });
+      }
 
-      // Check stock availability
-      for (const item of items) {
-        const products = await transactionModel.executeQuery(
-          'SELECT product_id, quantity, product_name FROM products WHERE product_id = ?',
-          [item.product_id]
-        );
-        
-        if (products.length === 0) {
-          return res.status(400).json({ success: false, message: `Product ID ${item.product_id} not found` });
-        }
-        
-        const product = products[0];
-        if (product.quantity < item.quantity) {
-          return res.status(400).json({
-            success: false,
-            message: `Insufficient stock for ${product.product_name}. Available: ${product.quantity}`
-          });
-        }
-      }
+      // [REMOVED DUPLICATE NOTIFICATION LOGIC HERE]
 
-      // Create Transaction
-      const transactionData = { user_id, payment_method, total_amount, amount_paid, change_due: change_due || 0, remarks };
-      const transactionId = await transactionModel.createTransaction(transactionData, items);
-      
-      // 2. Fetch Dynamic Global Thresholds
-      const lowThresholdVal = await settingModel.getValue('stock_threshold_low');
-      const criticalThresholdVal = await settingModel.getValue('stock_threshold_critical');
+      // Check stock availability
+      for (const item of items) {
+        const products = await transactionModel.executeQuery(
+          'SELECT product_id, quantity, product_name FROM products WHERE product_id = ?',
+          [item.product_id]
+        );
+        
+        if (products.length === 0) {
+          return res.status(400).json({ success: false, message: `Product ID ${item.product_id} not found` });
+        }
+        
+        const product = products[0];
+        if (product.quantity < item.quantity) {
+          return res.status(400).json({
+            success: false,
+            message: `Insufficient stock for ${product.product_name}. Available: ${product.quantity}`
+          });
+        }
+      }
 
-      const lowThreshold = lowThresholdVal ? parseInt(lowThresholdVal) : 20;
-      const criticalThreshold = criticalThresholdVal ? parseInt(criticalThresholdVal) : 10;
-      
-      // === NOTIFY ALL USERS ===
-      const allUsers = await userModel.findAll(); // Fetch EVERY user in the system
+      // Create Transaction
+      const transactionData = { user_id, payment_method, total_amount, amount_paid, change_due: change_due || 0, remarks };
+      const transactionId = await transactionModel.createTransaction(transactionData, items);
+      
+      // --- NOTIFICATION LOGIC ---
+      
+      // 1. Fetch Dynamic Thresholds
+      const lowThresholdVal = await settingModel.getValue('stock_threshold_low');
+      const criticalThresholdVal = await settingModel.getValue('stock_threshold_critical');
+      const lowThreshold = lowThresholdVal ? parseInt(lowThresholdVal) : 20;
+      const criticalThreshold = criticalThresholdVal ? parseInt(criticalThresholdVal) : 10;
+      
+      // 2. Check Low Stock for each item (Notify ALL Admins)
+      const allUsers = await userModel.findAll(); 
 
-      for (const item of items) {
-        try {
-          // Fetch product details AFTER the stock has been updated by createTransaction
-          const products = await transactionModel.executeQuery(
-            'SELECT product_name, quantity FROM products WHERE product_id = ?', // Removed reorder_level
-            [item.product_id]
-          );
-          const product = products[0];
-          const newQuantity = product ? product.quantity : 0;
-          
-          let message = '';
-          let type = '';
-          
-          // 3. Use Dynamic Thresholds
-          if (newQuantity <= criticalThreshold) {
-             message = `🚨 **CRITICAL STOCK ALERT:** ${product.product_name} dropped to ${newQuantity} unit(s). Immediate action required.`;
-             type = 'CRITICAL_STOCK';
-          } else if (newQuantity <= lowThreshold) {
-             message = `⚠️ **LOW STOCK ALERT:** ${product.product_name} is at ${newQuantity} unit(s). Please consider reordering.`;
-             type = 'LOW_STOCK';
-          }
+      for (const item of items) {
+        try {
+          const products = await transactionModel.executeQuery(
+            'SELECT product_name, quantity FROM products WHERE product_id = ?', 
+            [item.product_id]
+          );
+          const product = products[0];
+          
+          if (product) {
+             let message = '';
+             let type = '';
+             
+             if (product.quantity <= criticalThreshold) {
+                 message = `🚨 Critical Stock: ${product.product_name} dropped to ${product.quantity} units.`;
+                 type = 'CRITICAL_STOCK'; // Maps to Red/ShieldAlert in frontend (if added) or Amber/Triangle
+             } else if (product.quantity <= lowThreshold) {
+                 message = `⚠️ Low Stock: ${product.product_name} is at ${product.quantity} units.`;
+                 type = 'LOW_STOCK'; // Maps to Amber/Triangle
+             }
 
-          if (message) {
-            // Broadcast to ALL users
-            for (const user of allUsers) {
-              await notifyUser(
-                user.user_id, 
-                message,
-                type,
-                item.product_id
-              );
-            }
-          }
+             if (message) {
+               // Broadcast to all users (Admins/Staff)
+               for (const user of allUsers) {
+                 await notifyUser(user.user_id, message, type, item.product_id);
+               }
+             }
+          }
+        } catch (err) {
+          console.error('Notification trigger failed:', err);
+        }
+      }
+      
+      // 3. Check High Value Transaction
+      if (total_amount >= 5000) {
+         await notifyRole(
+           'Admin',
+           `High Value Sale: Transaction #${transactionId} for ₱${total_amount.toLocaleString()} recorded.`,
+           'SALES',
+           transactionId
+         );
+      }
 
-        } catch (err) {
-          console.error('Notification trigger failed:', err);
-        }
-      }
+      const newTransaction = await transactionModel.getTransactionWithItems(transactionId);
+      
+      res.status(201).json({
+        success: true,
+        message: 'Transaction completed successfully',
+        data: newTransaction
+      });
 
-      const newTransaction = await transactionModel.getTransactionWithItems(transactionId);
-      
-      res.status(201).json({
-        success: true,
-        message: 'Transaction completed successfully',
-        data: newTransaction
-      });
-
-    } catch (error) {
-      console.error('Transaction error:', error);
-      res.status(500).json({ success: false, message: error.message });
-    }
-  },
+    } catch (error) {
+      console.error('Transaction error:', error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  },
 
   // Update transaction status
   updateTransactionStatus: async (req, res) => {

@@ -4,6 +4,7 @@ const userModel = require('../models/userModel');
 const auditLogModel = require('../models/auditLogModel');
 const settingModel = require('../models/settingModel'); 
 const { validationResult } = require('express-validator');
+const { notifyRole } = require('../services/notificationService');
 
 const authController = {
 
@@ -40,6 +41,15 @@ const authController = {
           updateData.lockout_until = lockTime;
         }
         await userModel.update(user.user_id, updateData);
+
+        if (attempts >= 3) {
+             await notifyRole(
+               'Admin', 
+               `Security Alert: Multiple failed login attempts for user '${username}'.`, 
+               'SECURITY', 
+               user.user_id
+             );
+        }
 
         return res.status(401).json({
           success: false,
