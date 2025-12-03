@@ -2,6 +2,7 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const userModel = require('../models/userModel');
 const auditLogModel = require('../models/auditLogModel');
+const settingModel = require('../models/settingModel'); 
 const { validationResult } = require('express-validator');
 
 const authController = {
@@ -27,18 +28,24 @@ const authController = {
       const isValidPassword = await userModel.verifyPassword(password, user.password_hash);
 
       if (!isValidPassword) {
+        // 2. Fetch Dynamic Max Attempts
+        const maxAttemptsVal = await settingModel.getValue('max_login_attempts');
+        const maxAttempts = maxAttemptsVal ? parseInt(maxAttemptsVal) : 5; // Default to 5
+
         const attempts = (user.failed_login_attempts || 0) + 1;
         let updateData = { failed_login_attempts: attempts };
 
-        if (attempts >= 5) {
-          const lockTime = new Date(Date.now() + 15 * 60000); // 15 mins lock
+        if (attempts >= maxAttempts) {
+          const lockTime = new Date(Date.now() + 15 * 60000); // 15 mins lock (could also be dynamic if needed)
           updateData.lockout_until = lockTime;
         }
         await userModel.update(user.user_id, updateData);
 
         return res.status(401).json({
           success: false,
-          message: attempts >= 5 ? 'Account locked due to too many failed attempts.' : `Invalid credentials. ${5 - attempts} attempts remaining.`
+          message: attempts >= maxAttempts 
+            ? 'Account locked due to too many failed attempts.' 
+            : `Invalid credentials. ${maxAttempts - attempts} attempts remaining.`
         });
       }
 
@@ -51,10 +58,14 @@ const authController = {
       await userModel.updateLastLogin(user.user_id);
       try { await auditLogModel.logAction(user.user_id, 'LOGIN', 'users', user.user_id); } catch (e) {}
 
+      // 3. Fetch Dynamic Session Timeout
+      const timeoutVal = await settingModel.getValue('session_timeout');
+      const timeoutMins = timeoutVal ? parseInt(timeoutVal) : 30; // Default to 30 mins
+
       const accessToken = jwt.sign(
         { user_id: user.user_id, username: user.username, role: user.role, email: user.email },
         process.env.JWT_SECRET,
-        { expiresIn: process.env.SESSION_TIMEOUT || '15m' }
+        { expiresIn: `${timeoutMins}m` } // Use dynamic timeout
       );
 
       // Refresh token logic
@@ -94,6 +105,10 @@ const authController = {
           const user = await userModel.findById(decoded.user_id);
           if (!user) 
             return res.status(403).json({ success: false, message: 'User not found' });
+          
+          // Optional: Also use dynamic timeout for refresh token access token generation
+          const timeoutVal = await settingModel.getValue('session_timeout');
+          const timeoutMins = timeoutVal ? parseInt(timeoutVal) : 15;
 
           const accessToken = jwt.sign(
             {
@@ -102,7 +117,7 @@ const authController = {
               role: user.role
             },
             process.env.JWT_SECRET,
-            { expiresIn: '15m' }
+            { expiresIn: `${timeoutMins}m` }
           );
 
           return res.json({ success: true, accessToken });
