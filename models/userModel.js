@@ -7,50 +7,45 @@ class UserModel extends BaseModel {
     super('users');
   }
 
-  async findAll(conditions = {}, limit = null, offset = null) {
-    let query = `SELECT * FROM ${this.tableName}`;
+  // --- NEW METHOD FOR DYNAMIC SEARCH AND FILTERING ---
+  async findAllUsersWithSearch(conditions = {}) {
+    // Select all user fields except the sensitive password hash
+    let query = `SELECT user_id, full_name, username, email, role, status, created_at, last_login, last_updated 
+                 FROM ${this.tableName}`;
     const params = [];
     const whereClauses = [];
 
-    const { search, ...otherFilters } = conditions;
-
-    // 1. Handle Standard Filters (Exact Match)
-    if (Object.keys(otherFilters).length > 0) {
-      Object.keys(otherFilters).forEach(key => {
-        if (otherFilters[key] !== undefined && otherFilters[key] !== null) {
-            whereClauses.push(`${key} = ?`);
-            params.push(otherFilters[key]);
-        }
-      });
+    const { search, role, status } = conditions;
+    
+    // Standard Filters
+    if (role) {
+      whereClauses.push(`role = ?`);
+      params.push(role);
     }
-
-    // 2. Handle Search Logic (Partial Match on Name, Username, or Email)
+    if (status) {
+      whereClauses.push(`status = ?`);
+      params.push(status);
+    }
+    
+    // Dynamic Search Logic (full_name, username, email)
     if (search) {
       whereClauses.push('(full_name LIKE ? OR username LIKE ? OR email LIKE ?)');
       const searchTerm = `%${search}%`;
+      // Push the search term three times for the three fields in the OR clause
       params.push(searchTerm, searchTerm, searchTerm);
     }
-
-    // 3. Assemble Query
+    
     if (whereClauses.length > 0) {
       query += ` WHERE ${whereClauses.join(' AND ')}`;
     }
-
-    query += ` ORDER BY created_at DESC`;
-
-    if (limit !== null) {
-      query += ` LIMIT ?`;
-      params.push(parseInt(limit));
-    }
     
-    if (offset !== null) {
-      query += ` OFFSET ?`;
-      params.push(parseInt(offset));
-    }
+    // Default sorting
+    query += ` ORDER BY full_name ASC`;
 
+    // Note: The controller handles pagination on the result set.
     return this.executeQuery(query, params);
   }
-
+  // --- END NEW METHOD ---
 
   async findByUsername(username) {
     const results = await this.executeQuery(
