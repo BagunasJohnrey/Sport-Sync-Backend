@@ -20,7 +20,7 @@ const transactionController = {
       `;
       const params = [];
       
-      // FIX: Use DATE() function to ignore time components when filtering
+      // FIX: Use DATE() function for date filtering
       if (start_date && end_date) {
         query += ' AND DATE(t.transaction_date) BETWEEN ? AND ?';
         params.push(start_date, end_date);
@@ -41,7 +41,7 @@ const transactionController = {
       const countParams = [];
       
       if (start_date && end_date) {
-        countQuery += ' AND DATE(transaction_date) BETWEEN ? AND ?'; // FIX: Consistent date logic
+        countQuery += ' AND DATE(transaction_date) BETWEEN ? AND ?';
         countParams.push(start_date, end_date);
       }
       
@@ -105,33 +105,9 @@ const transactionController = {
 
       const { user_id, payment_method, total_amount, amount_paid, change_due, remarks, items } = req.body;
 
+      // Validate items
       if (!items || !Array.isArray(items) || items.length === 0) {
         return res.status(400).json({ success: false, message: 'Transaction must have at least one item' });
-      }
-
-      // --- UPDATED: Low Stock Notification (Using notifyRole for ALL Admins) ---
-      if (Array.isArray(items)) {
-        items.forEach(async (item) => {
-          try {
-            const products = await transactionModel.executeQuery('SELECT * FROM products WHERE product_id = ?', [item.product_id]);
-            const product = products[0];
-            
-            if (product) {
-               const remainingStock = product.quantity - item.quantity;
-               // Trigger if remaining stock hits reorder level
-               if (remainingStock <= product.reorder_level) {
-                  await notifyRole(
-                    'Admin', 
-                    `Urgent: Stock for ${product.product_name} dropped to ${remainingStock}.`,
-                    'SALES',
-                    product.product_id
-                  );
-               }
-            }
-          } catch (err) {
-            console.error('Notification trigger failed', err);
-          }
-        });
       }
 
       // Check stock availability
@@ -154,20 +130,69 @@ const transactionController = {
         }
       }
 
-      // Create Transaction
-      // FIX: Explicitly set status to 'Completed' for POS sales
+      // FIX 1: Normalize payment method to GCash
+      let normalizedPaymentMethod = payment_method;
+      if (payment_method === 'Mobile' || payment_method === 'mobile') {
+        normalizedPaymentMethod = 'GCash';
+      }
+
+      // FIX 2: Create Transaction with status = 'Completed' and normalized payment method
       const transactionData = { 
           user_id, 
-          payment_method, 
+          payment_method: normalizedPaymentMethod, // Use normalized value
           total_amount, 
           amount_paid, 
           change_due: change_due || 0, 
           remarks,
-          status: 'Completed' // Added status
+          status: 'Completed' // Explicitly set status
       };
       
       const transactionId = await transactionModel.createTransaction(transactionData, items);
+      
+      // --- NOTIFICATION LOGIC ---
+      
+      // 1. Fetch Dynamic Thresholds
+      const lowThresholdVal = await settingModel.getValue('stock_threshold_low');
+      const criticalThresholdVal = await settingModel.getValue('stock_threshold_critical');
+      const lowThreshold = lowThresholdVal ? parseInt(lowThresholdVal) : 20;
+      const criticalThreshold = criticalThresholdVal ? parseInt(criticalThresholdVal) : 10;
+      
+      // 2. Check Low Stock for each item (Notify ALL Admins)
+      const allUsers = await userModel.findAll(); 
 
+      for (const item of items) {
+        try {
+          const products = await transactionModel.executeQuery(
+            'SELECT product_name, quantity FROM products WHERE product_id = ?', 
+            [item.product_id]
+          );
+          const product = products[0];
+          
+          if (product) {
+             let message = '';
+             let type = '';
+             
+             if (product.quantity <= criticalThreshold) {
+                 message = `🚨 Critical Stock: ${product.product_name} dropped to ${product.quantity} units.`;
+                 type = 'CRITICAL_STOCK';
+             } else if (product.quantity <= lowThreshold) {
+                 message = `⚠️ Low Stock: ${product.product_name} is at ${product.quantity} units.`;
+                 type = 'LOW_STOCK';
+             }
+
+             if (message) {
+               // Broadcast to all users
+               for (const user of allUsers) {
+                 await notifyUser(user.user_id, message, type, item.product_id);
+               }
+             }
+          }
+        } catch (err) {
+          console.error('Notification trigger failed:', err);
+        }
+      }
+      
+      // 3. Check High Value Transaction
       if (total_amount >= 5000) {
          await notifyRole(
            'Admin',
@@ -176,7 +201,6 @@ const transactionController = {
            transactionId
          );
       }
-      
 
       const newTransaction = await transactionModel.getTransactionWithItems(transactionId);
       
@@ -220,7 +244,7 @@ const transactionController = {
     }
   },
 
-  // Get sales report (Kept as is, it already had correct date logic)
+  // FIX 3: Get sales report with proper status filtering
   getSalesReport: async (req, res) => {
     try {
       const { start_date, end_date } = req.query;
@@ -234,6 +258,7 @@ const transactionController = {
   
       console.log(`📊 Generating sales report for ${start_date} to ${end_date}`);
   
+      // FIX: Add status = 'Completed' filter
       const reportQuery = `
         SELECT 
           DATE(t.transaction_date) as date,
@@ -243,12 +268,14 @@ const transactionController = {
         FROM transactions t
         LEFT JOIN transaction_items ti ON t.transaction_id = ti.transaction_id
         WHERE DATE(t.transaction_date) BETWEEN ? AND ?
+        AND t.status = 'Completed'
         GROUP BY DATE(t.transaction_date)
         ORDER BY date
       `;
       
       const dailySales = await transactionModel.executeQuery(reportQuery, [start_date, end_date]);
       
+      // FIX: Add status = 'Completed' filter to top products query
       const topProductsQuery = `
         SELECT 
           p.product_id,
@@ -259,6 +286,7 @@ const transactionController = {
         LEFT JOIN products p ON ti.product_id = p.product_id
         LEFT JOIN transactions t ON ti.transaction_id = t.transaction_id
         WHERE DATE(t.transaction_date) BETWEEN ? AND ?
+        AND t.status = 'Completed'
         GROUP BY p.product_id, p.product_name
         ORDER BY total_quantity DESC
         LIMIT 10

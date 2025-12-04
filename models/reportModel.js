@@ -34,17 +34,18 @@ class ReportModel extends BaseModel {
   // --- ANALYTICS METHODS ---
 
   async getSalesKPIs(startDate, endDate) {
+    // FIX: Add status = 'Completed' filter
     const query = `
       SELECT
         COALESCE(SUM(total_amount), 0) as total_revenue,
         COUNT(transaction_id) as total_transactions,
         COALESCE(AVG(total_amount), 0) as average_transaction_value,
         (SELECT payment_method FROM transactions
-          WHERE status = 'Completed' AND transaction_date BETWEEN ? AND ?
+          WHERE status = 'Completed' AND DATE(transaction_date) BETWEEN ? AND ?
           GROUP BY payment_method ORDER BY COUNT(*) DESC LIMIT 1) as top_payment_method
       FROM transactions
       WHERE status = 'Completed'
-      AND transaction_date BETWEEN ? AND ?
+      AND DATE(transaction_date) BETWEEN ? AND ?
     `;
     const result = await this.executeQuery(query, [startDate, endDate, startDate, endDate]);
     return result[0];
@@ -57,6 +58,8 @@ class ReportModel extends BaseModel {
       case 'weekly':  dateFormat = '%Y-W%u'; break;
       default:        dateFormat = '%Y-%m-%d'; // daily
     }
+    
+    // FIX: Add status = 'Completed' filter
     const query = `
       SELECT
         DATE_FORMAT(transaction_date, '${dateFormat}') as date_label,
@@ -64,7 +67,7 @@ class ReportModel extends BaseModel {
         COUNT(*) as total_sales_count
       FROM transactions
       WHERE status = 'Completed'
-      AND transaction_date BETWEEN ? AND ?
+      AND DATE(transaction_date) BETWEEN ? AND ?
       GROUP BY date_label
       ORDER BY date_label ASC
     `;
@@ -72,6 +75,7 @@ class ReportModel extends BaseModel {
   }
 
   async getSalesByCategory(startDate, endDate) {
+    // FIX: Add status = 'Completed' filter
     const query = `
       SELECT
         pc.category_name,
@@ -82,32 +86,32 @@ class ReportModel extends BaseModel {
       JOIN product_categories pc ON p.category_id = pc.category_id
       JOIN transactions t ON ti.transaction_id = t.transaction_id
       WHERE t.status = 'Completed'
-      AND t.transaction_date BETWEEN ? AND ?
+      AND DATE(t.transaction_date) BETWEEN ? AND ?
       GROUP BY pc.category_id, pc.category_name
     `;
     return this.executeQuery(query, [startDate, endDate]);
   }
 
-  // FIX: Ensure valid payment methods are returned
-  // Using CASE to map 'Mobile' to 'GCash' directly in SQL if desired, or keep raw 'Mobile'
+  // FIX: Normalize payment methods and add status filter
   async getPaymentMethodStats(startDate, endDate) {
     const query = `
       SELECT
         CASE 
             WHEN payment_method = 'Mobile' THEN 'GCash'
-            ELSE COALESCE(payment_method, 'Unknown')
+            WHEN payment_method IS NULL OR payment_method = '' THEN 'Other'
+            ELSE payment_method
         END as payment_method,
         COUNT(*) as usage_count
       FROM transactions
       WHERE status = 'Completed'
-      AND transaction_date BETWEEN ? AND ?
+      AND DATE(transaction_date) BETWEEN ? AND ?
       GROUP BY payment_method
       ORDER BY usage_count DESC
     `;
     return this.executeQuery(query, [startDate, endDate]);
   }
 
-  // UPDATED: Include category name and profit calculation
+  // FIX: Add status = 'Completed' filter, include category name, profit, AND margin %
   async getTopSellingProducts(startDate, endDate) {
     const query = `
       SELECT
@@ -115,13 +119,18 @@ class ReportModel extends BaseModel {
         pc.category_name,
         SUM(ti.quantity) as total_sold,
         SUM(ti.total_price) as total_revenue,
-        SUM(ti.quantity * (ti.unit_price - COALESCE(p.cost_price, 0))) as total_profit
+        SUM(ti.quantity * (ti.unit_price - COALESCE(p.cost_price, 0))) as total_profit,
+        CASE 
+          WHEN SUM(ti.total_price) > 0 
+          THEN ROUND((SUM(ti.quantity * (ti.unit_price - COALESCE(p.cost_price, 0))) / SUM(ti.total_price)) * 100, 2)
+          ELSE 0 
+        END as margin_percent
       FROM transaction_items ti
       JOIN products p ON ti.product_id = p.product_id
       LEFT JOIN product_categories pc ON p.category_id = pc.category_id
       JOIN transactions t ON ti.transaction_id = t.transaction_id
       WHERE t.status = 'Completed'
-      AND t.transaction_date BETWEEN ? AND ?
+      AND DATE(t.transaction_date) BETWEEN ? AND ?
       GROUP BY p.product_id, p.product_name, pc.category_name
       ORDER BY total_sold DESC
       LIMIT 10

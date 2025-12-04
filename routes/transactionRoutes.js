@@ -6,7 +6,7 @@ const { body } = require('express-validator');
 
 const transactionValidation = [
   body('user_id').isInt({ min: 1 }).withMessage('Valid user ID is required'),
-  body('payment_method').isIn(['Cash', 'Card', 'Mobile']).withMessage('Valid payment method is required'),
+  body('payment_method').isIn(['Cash', 'Card', 'GCash']).withMessage('Valid payment method is required'),
   body('total_amount').isFloat({ min: 0 }).withMessage('Valid total amount is required'),
   body('amount_paid').isFloat({ min: 0 }).withMessage('Valid amount paid is required'),
   body('items').isArray({ min: 1 }).withMessage('At least one item is required')
