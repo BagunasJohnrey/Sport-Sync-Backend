@@ -61,14 +61,29 @@ class ProductModel extends BaseModel {
     return results[0] || null;
   }
 
-  async getLowStockProducts() {
-    const query = `
-      SELECT p.*, pc.category_name 
-      FROM products p 
-      LEFT JOIN product_categories pc ON p.category_id = pc.category_id 
-      WHERE p.quantity <= p.reorder_level AND p.status = 'Active'
-    `;
-    return this.executeQuery(query);
+  async getLowStockProducts(threshold = null) {
+    let query;
+    let params = [];
+
+    if (threshold !== null) {
+      // Use Global Setting (Removed 'AND p.quantity > 0' to include Out of Stock)
+      query = `
+        SELECT p.*, pc.category_name 
+        FROM products p 
+        LEFT JOIN product_categories pc ON p.category_id = pc.category_id 
+        WHERE p.quantity <= ? AND p.status = 'Active'
+      `;
+      params.push(threshold);
+    } else {
+      // Fallback (Removed 'AND p.quantity > 0')
+      query = `
+        SELECT p.*, pc.category_name 
+        FROM products p 
+        LEFT JOIN product_categories pc ON p.category_id = pc.category_id 
+        WHERE p.quantity <= p.reorder_level AND p.status = 'Active'
+      `;
+    }
+    return this.executeQuery(query, params);
   }
 
   async updateStock(productId, newQuantity, userId = null, changeType = 'Adjustment') {
@@ -119,17 +134,27 @@ class ProductModel extends BaseModel {
   }
 
   // Inventory Report Methods 
-  async getInventorySummary() {
+  async getInventorySummary(threshold = null) {
+    let lowStockExpression;
+    let params = [];
+
+    if (threshold !== null) {
+        lowStockExpression = `CASE WHEN quantity <= ? AND quantity > 0 THEN 1 ELSE 0 END`;
+        params.push(threshold);
+    } else {
+        lowStockExpression = `CASE WHEN quantity <= reorder_level AND quantity > 0 THEN 1 ELSE 0 END`;
+    }
+
     const query = `
       SELECT
         COUNT(*) as total_products,
         COALESCE(SUM(quantity * cost_price), 0) as total_inventory_value,
-        SUM(CASE WHEN quantity <= reorder_level AND quantity > 0 THEN 1 ELSE 0 END) as low_stock_count,
+        SUM(${lowStockExpression}) as low_stock_count,
         SUM(CASE WHEN quantity = 0 THEN 1 ELSE 0 END) as out_of_stock_count
       FROM products
       WHERE status = 'Active'
     `;
-    const result = await this.executeQuery(query);
+    const result = await this.executeQuery(query, params);
     return result[0];
   }
 

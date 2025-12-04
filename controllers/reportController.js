@@ -1,5 +1,6 @@
 const reportModel = require('../models/reportModel');
 const productModel = require('../models/productModel');
+const settingModel = require('../models/settingModel');
 // 1. Import pool directly to run raw queries for backup
 const { pool } = require('../db/connection'); 
 const { generatePDF } = require('../services/pdfService');
@@ -40,10 +41,14 @@ const reportController = {
   // 2. Inventory Report
   getInventoryReport: async (req, res) => {
     try {
+      // Fetch Global Setting
+      const lowThresholdVal = await settingModel.getValue('stock_threshold_low');
+      const lowThreshold = lowThresholdVal ? parseInt(lowThresholdVal) : 20; 
+
       const [summary, byCategory, lowStock] = await Promise.all([
-        productModel.getInventorySummary(),
+        productModel.getInventorySummary(lowThreshold),       // Pass Global Threshold
         productModel.getInventoryByCategory(),
-        productModel.getLowStockProducts()
+        productModel.getLowStockProducts(lowThreshold)        // Pass Global Threshold
       ]);
 
       res.json({
@@ -55,7 +60,6 @@ const reportController = {
         }
       });
     } catch (error) {
-      console.error('Inventory Report Error:', error);
       res.status(500).json({ success: false, message: error.message });
     }
   },
