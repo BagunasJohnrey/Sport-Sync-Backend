@@ -1,7 +1,6 @@
 const reportModel = require('../models/reportModel');
 const productModel = require('../models/productModel');
 const settingModel = require('../models/settingModel');
-// 1. Import pool directly to run raw queries for backup
 const { pool } = require('../db/connection'); 
 const { generatePDF } = require('../services/pdfService');
 const { generateExcel } = require('../services/excelService');
@@ -38,28 +37,43 @@ const reportController = {
     }
   },
 
-  // 2. Inventory Report
+  // ✅ FIX: Updated Inventory Report to use global settings consistently
   getInventoryReport: async (req, res) => {
     try {
-      // Fetch Global Setting
+      // Fetch global settings for thresholds
+      const criticalThresholdVal = await settingModel.getValue('stock_threshold_critical');
       const lowThresholdVal = await settingModel.getValue('stock_threshold_low');
-      const lowThreshold = lowThresholdVal ? parseInt(lowThresholdVal) : 20; 
+      
+      const criticalThreshold = criticalThresholdVal ? parseInt(criticalThresholdVal) : 10;
+      const lowThreshold = lowThresholdVal ? parseInt(lowThresholdVal) : 20;
 
+      // Pass both thresholds to ensure consistent KPI calculations
       const [summary, byCategory, lowStock] = await Promise.all([
-        productModel.getInventorySummary(lowThreshold),       // Pass Global Threshold
+        productModel.getInventorySummary(criticalThreshold, lowThreshold),
         productModel.getInventoryByCategory(),
-        productModel.getLowStockProducts(lowThreshold)        // Pass Global Threshold
+        productModel.getLowStockProducts(criticalThreshold, lowThreshold)
       ]);
+
+      console.log('📊 Inventory Report Data:');
+      console.log('  - Critical Threshold:', criticalThreshold);
+      console.log('  - Low Threshold:', lowThreshold);
+      console.log('  - Critical Stock Count (<= critical):', summary.critical_stock_count);
+      console.log('  - Low Stock Count (> critical and <= low):', summary.low_stock_count);
+      console.log('  - Low Stock Products (Alert):', lowStock.length);
 
       res.json({
         success: true,
         data: {
-          summary,
+          summary: {
+            ...summary,
+            products_requiring_attention: lowStock
+          },
           inventory_by_category: byCategory,
           products_requiring_attention: lowStock
         }
       });
     } catch (error) {
+      console.error('Inventory Report Error:', error);
       res.status(500).json({ success: false, message: error.message });
     }
   },
@@ -135,7 +149,12 @@ const reportController = {
   // 4. Profitability Analysis
   getProfitabilityAnalysis: async (req, res) => {
     try {
-      const profitabilityData = await productModel.getProductProfitability();
+      // Extract the dates from the request
+      const { start_date, end_date } = req.query; 
+
+      // Pass these dates to the Model
+      const profitabilityData = await productModel.getProductProfitability(start_date, end_date);
+      
       res.json({ success: true, data: profitabilityData });
     } catch (error) {
       res.status(500).json({ success: false, message: error.message });
