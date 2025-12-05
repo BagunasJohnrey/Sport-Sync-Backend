@@ -63,27 +63,30 @@ class ProductModel extends BaseModel {
 
   /**
    * Get products requiring attention.
-   * - Includes both critical (<= criticalThreshold) and low (>criticalThreshold && <= lowThreshold).
-   * - Adds a stock_level field: 'critical' or 'low'
+   * - Includes Out of Stock (0), Critical (<= criticalThreshold), and Low (> critical && <= low).
+   * - Adds a stock_level field: 'out_of_stock', 'critical', or 'low'
    */
   async getLowStockProducts(criticalThreshold = 10, lowThreshold = 20) {
     const query = `
       SELECT p.*, pc.category_name,
         CASE
+          WHEN p.quantity = 0 THEN 'out_of_stock'
           WHEN p.quantity <= ? THEN 'critical'
           WHEN p.quantity > ? AND p.quantity <= ? THEN 'low'
           ELSE 'normal'
         END AS stock_level
       FROM products p
       LEFT JOIN product_categories pc ON p.category_id = pc.category_id
-      WHERE p.quantity > 0
-        AND p.quantity <= ?
+      WHERE p.quantity <= ?  -- Removed "p.quantity > 0" to include Out of Stock items
         AND p.status = 'Active'
       ORDER BY p.quantity ASC
     `;
 
-    // params: criticalThreshold (for first CASE), criticalThreshold (for second CASE lower bound),
-    // lowThreshold (for second CASE upper bound), lowThreshold (for WHERE upper bound)
+    // params: 
+    // 1. criticalThreshold (CASE: critical)
+    // 2. criticalThreshold (CASE: low start)
+    // 3. lowThreshold (CASE: low end)
+    // 4. lowThreshold (WHERE clause)
     const params = [criticalThreshold, criticalThreshold, lowThreshold, lowThreshold];
 
     const results = await this.executeQuery(query, params);
@@ -141,15 +144,16 @@ class ProductModel extends BaseModel {
 
 
   async getInventorySummary(criticalThreshold = 10, lowThreshold = 20) {
+    // FIX: Removed "WHERE status = 'Active'" from the main clause so total_products counts everything.
+    // Added "CASE WHEN status = 'Active'" to specific metrics so Archived items don't trigger alerts or add to value.
     const query = `
       SELECT
         COUNT(*) AS total_products,
-        SUM(CASE WHEN quantity = 0 THEN 1 ELSE 0 END) AS out_of_stock_count,
-        SUM(CASE WHEN quantity > 0 AND quantity <= ? THEN 1 ELSE 0 END) AS critical_stock_count,
-        SUM(CASE WHEN quantity > ? AND quantity <= ? THEN 1 ELSE 0 END) AS low_stock_count,
-        COALESCE(SUM(cost_price * quantity), 0) AS total_inventory_value
-      FROM products
-      WHERE status = 'Active';
+        SUM(CASE WHEN status = 'Active' AND quantity = 0 THEN 1 ELSE 0 END) AS out_of_stock_count,
+        SUM(CASE WHEN status = 'Active' AND quantity > 0 AND quantity <= ? THEN 1 ELSE 0 END) AS critical_stock_count,
+        SUM(CASE WHEN status = 'Active' AND quantity > ? AND quantity <= ? THEN 1 ELSE 0 END) AS low_stock_count,
+        COALESCE(SUM(CASE WHEN status = 'Active' THEN cost_price * quantity ELSE 0 END), 0) AS total_inventory_value
+      FROM products;
     `;
     // params: criticalThreshold (for critical), criticalThreshold (lower bound for low), lowThreshold (upper bound for low)
     const params = [criticalThreshold, criticalThreshold, lowThreshold];
@@ -183,8 +187,7 @@ class ProductModel extends BaseModel {
 async getProductProfitability(startDate, endDate) {
     // Default start date if missing
     const start = startDate || '2000-01-01';
-    
-    // FIX: If endDate is just a date string (YYYY-MM-DD), add the time to covering the whole day
+
     let end = endDate || new Date().toISOString().split('T')[0];
     if (end.length === 10) {
         end += ' 23:59:59'; 
