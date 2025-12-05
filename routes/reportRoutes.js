@@ -6,10 +6,10 @@ const authMiddleware = require('../middleware/auth');
 router.use(authMiddleware.verifyToken);
 
 // Sales Reports - Admin Only
-router.get('/sales', authMiddleware.requireRole(['Admin']), reportController.getDashboardAnalytics);
+router.get('/sales', authMiddleware.requireRole(['Admin', 'Staff', 'Cashier']), reportController.getDashboardAnalytics);
 
 // Inventory Reports - Admin & Staff
-router.get('/inventory', authMiddleware.requireRole(['Admin', 'Staff']), reportController.getInventoryReport);
+router.get('/inventory', authMiddleware.requireRole(['Admin', 'Staff', 'Cashier']), reportController.getInventoryReport);
 
 // Backup - Admin Only
 router.get('/backup', authMiddleware.requireRole(['Admin']), reportController.exportDatabase);
