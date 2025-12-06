@@ -17,7 +17,7 @@ const updateUserValidation = [
   body('full_name').optional().notEmpty().withMessage('Full name cannot be empty'),
   body('username').optional().isLength({ min: 3 }).withMessage('Username must be at least 3 characters'),
   body('email').optional().isEmail().withMessage('Valid email is required'),
-  body('password').optional().isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
+  body('password').optional().isLength({ min: 8 }).withMessage('Password must be at least 8 characters'),
   body('role').optional().isIn(['Admin', 'Staff', 'Cashier']).withMessage('Invalid role'),
   body('status').optional().isIn(['Active', 'Inactive']).withMessage('Invalid status')
 ];
