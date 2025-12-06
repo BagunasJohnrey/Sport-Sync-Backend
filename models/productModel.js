@@ -61,14 +61,38 @@ class ProductModel extends BaseModel {
     return results[0] || null;
   }
 
-  async getLowStockProducts() {
+  /**
+   * Get products requiring attention.
+   * - Includes Out of Stock (0), Critical (<= criticalThreshold), and Low (> critical && <= low).
+   * - Adds a stock_level field: 'out_of_stock', 'critical', or 'low'
+   */
+  async getLowStockProducts(criticalThreshold = 10, lowThreshold = 20) {
     const query = `
-      SELECT p.*, pc.category_name 
-      FROM products p 
-      LEFT JOIN product_categories pc ON p.category_id = pc.category_id 
-      WHERE p.quantity <= p.reorder_level AND p.status = 'Active'
+      SELECT p.*, pc.category_name,
+        CASE
+          WHEN p.quantity = 0 THEN 'out_of_stock'
+          WHEN p.quantity <= ? THEN 'critical'
+          WHEN p.quantity > ? AND p.quantity <= ? THEN 'low'
+          ELSE 'normal'
+        END AS stock_level
+      FROM products p
+      LEFT JOIN product_categories pc ON p.category_id = pc.category_id
+      WHERE p.quantity <= ?  -- Removed "p.quantity > 0" to include Out of Stock items
+        AND p.status = 'Active'
+      ORDER BY p.quantity ASC
     `;
-    return this.executeQuery(query);
+
+    // params: 
+    // 1. criticalThreshold (CASE: critical)
+    // 2. criticalThreshold (CASE: low start)
+    // 3. lowThreshold (CASE: low end)
+    // 4. lowThreshold (WHERE clause)
+    const params = [criticalThreshold, criticalThreshold, lowThreshold, lowThreshold];
+
+    const results = await this.executeQuery(query, params);
+
+    console.log(`📦 getLowStockProducts - critical=${criticalThreshold}, low=${lowThreshold}, found=${results.length}`);
+    return results;
   }
 
   async updateStock(productId, newQuantity, userId = null, changeType = 'Adjustment') {
@@ -118,19 +142,29 @@ class ProductModel extends BaseModel {
     }
   }
 
-  // Inventory Report Methods 
-  async getInventorySummary() {
+
+  async getInventorySummary(criticalThreshold = 10, lowThreshold = 20) {
+    // FIX: Removed "WHERE status = 'Active'" from the main clause so total_products counts everything.
+    // Added "CASE WHEN status = 'Active'" to specific metrics so Archived items don't trigger alerts or add to value.
     const query = `
       SELECT
-        COUNT(*) as total_products,
-        COALESCE(SUM(quantity * cost_price), 0) as total_inventory_value,
-        SUM(CASE WHEN quantity <= reorder_level AND quantity > 0 THEN 1 ELSE 0 END) as low_stock_count,
-        SUM(CASE WHEN quantity = 0 THEN 1 ELSE 0 END) as out_of_stock_count
-      FROM products
-      WHERE status = 'Active'
+        COUNT(*) AS total_products,
+        SUM(CASE WHEN status = 'Active' AND quantity = 0 THEN 1 ELSE 0 END) AS out_of_stock_count,
+        SUM(CASE WHEN status = 'Active' AND quantity > 0 AND quantity <= ? THEN 1 ELSE 0 END) AS critical_stock_count,
+        SUM(CASE WHEN status = 'Active' AND quantity > ? AND quantity <= ? THEN 1 ELSE 0 END) AS low_stock_count,
+        COALESCE(SUM(CASE WHEN status = 'Active' THEN cost_price * quantity ELSE 0 END), 0) AS total_inventory_value
+      FROM products;
     `;
-    const result = await this.executeQuery(query);
-    return result[0];
+    // params: criticalThreshold (for critical), criticalThreshold (lower bound for low), lowThreshold (upper bound for low)
+    const params = [criticalThreshold, criticalThreshold, lowThreshold];
+    const result = await this.executeQuery(query, params);
+    return result[0] || {
+      total_products: 0,
+      out_of_stock_count: 0,
+      critical_stock_count: 0,
+      low_stock_count: 0,
+      total_inventory_value: 0
+    };
   }
 
   // UPDATED: Now includes total value and low stock counts per category
@@ -150,8 +184,15 @@ class ProductModel extends BaseModel {
     return this.executeQuery(query);
   }
 
-  // Add this method to the ProductModel class
-  async getProductProfitability() {
+async getProductProfitability(startDate, endDate) {
+    // Default start date if missing
+    const start = startDate || '2000-01-01';
+
+    let end = endDate || new Date().toISOString().split('T')[0];
+    if (end.length === 10) {
+        end += ' 23:59:59'; 
+    }
+
     const query = `
       SELECT 
         p.product_id,
@@ -159,17 +200,38 @@ class ProductModel extends BaseModel {
         pc.category_name,
         p.cost_price,
         p.selling_price,
-        (p.selling_price - p.cost_price) as gross_profit,
+
+        -- 1. Total Quantity Sold
+        COALESCE(SUM(ti.quantity), 0) as total_quantity_sold,
+        
+        -- 2. Total Revenue
+        COALESCE(SUM(ti.total_price), 0) as total_revenue,
+
+        -- 3. Gross Profit
+        COALESCE(SUM(ti.total_price) - (SUM(ti.quantity) * p.cost_price), 0) as gross_profit,
+
+        -- 4. Margin %
         CASE 
-          WHEN p.selling_price > 0 THEN ((p.selling_price - p.cost_price) / p.selling_price) * 100
+          WHEN SUM(ti.total_price) > 0 THEN 
+            ((SUM(ti.total_price) - (SUM(ti.quantity) * p.cost_price)) / SUM(ti.total_price)) * 100
           ELSE 0 
         END as margin_percent
+
       FROM products p
       LEFT JOIN product_categories pc ON p.category_id = pc.category_id
-      WHERE p.status = 'Active'
-      ORDER BY margin_percent DESC
+      INNER JOIN transaction_items ti ON p.product_id = ti.product_id
+      INNER JOIN transactions t ON ti.transaction_id = t.transaction_id
+
+      -- The Filter
+      WHERE t.transaction_date >= ? 
+      AND t.transaction_date <= ? 
+      AND t.status = 'Completed'
+
+      GROUP BY p.product_id, p.product_name, pc.category_name, p.cost_price, p.selling_price
+      ORDER BY gross_profit DESC
     `;
-    return this.executeQuery(query);
+
+    return this.executeQuery(query, [start, end]);
   }
 
   getPrimaryKey() {

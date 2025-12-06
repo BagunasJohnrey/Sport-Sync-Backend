@@ -196,6 +196,34 @@ const productController = {
       try { await auditLogModel.logAction(req.user.user_id, 'DELETE_PRODUCT', 'products', productId); } catch (e) {}
       res.json({ success: true, message: 'Product deleted successfully' });
     } catch (error) { res.status(500).json({ success: false, message: error.message }); }
+  },
+
+  // Inventory Report
+  getInventoryReport: async (req, res) => {
+    try {
+      // 1. Fetch global low stock setting
+      const lowThresholdVal = await settingModel.getValue('stock_threshold_low');
+      const lowThreshold = lowThresholdVal ? parseInt(lowThresholdVal) : 20; // Default to 20 if not set
+
+      // 2. Pass threshold to model methods
+      const [summary, byCategory, lowStock] = await Promise.all([
+        productModel.getInventorySummary(lowThreshold),       // Use global setting for count
+        productModel.getInventoryByCategory(),
+        productModel.getLowStockProducts(lowThreshold)        // Use global setting for list
+      ]);
+
+      res.json({
+        success: true,
+        data: {
+          summary,
+          inventory_by_category: byCategory,
+          products_requiring_attention: lowStock
+        }
+      });
+    } catch (error) {
+      console.error('Inventory Report Error:', error);
+      res.status(500).json({ success: false, message: error.message });
+    }
   }
 };
 
