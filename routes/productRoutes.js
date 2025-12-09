@@ -18,7 +18,7 @@ const updateProductValidation = [
   body('product_name').optional().notEmpty(),
   body('category_id').optional().isInt({ min: 1 }),
   body('selling_price').optional().isFloat({ min: 0 }),
-  body('status').optional().isIn(['Active', 'Inactive'])
+  body('status').optional().isIn(['Active', 'Archived'])
 ];
 
 // Apply authentication
