@@ -29,15 +29,19 @@ const authController = {
       const isValidPassword = await userModel.verifyPassword(password, user.password_hash);
 
       if (!isValidPassword) {
-        // 2. Fetch Dynamic Max Attempts
+        // 2. Fetch Dynamic Settings
         const maxAttemptsVal = await settingModel.getValue('max_login_attempts');
         const maxAttempts = maxAttemptsVal ? parseInt(maxAttemptsVal) : 5; // Default to 5
+
+        // REPURPOSED: Use 'session_timeout' setting as the Lockout Duration
+        const lockoutVal = await settingModel.getValue('session_timeout');
+        const lockoutMins = lockoutVal ? parseInt(lockoutVal) : 15; // Default to 15 mins if not set
 
         const attempts = (user.failed_login_attempts || 0) + 1;
         let updateData = { failed_login_attempts: attempts };
 
         if (attempts >= maxAttempts) {
-          const lockTime = new Date(Date.now() + 15 * 60000); // 15 mins lock (could also be dynamic if needed)
+          const lockTime = new Date(Date.now() + lockoutMins * 60000); 
           updateData.lockout_until = lockTime;
         }
         await userModel.update(user.user_id, updateData);
@@ -54,7 +58,7 @@ const authController = {
         return res.status(401).json({
           success: false,
           message: attempts >= maxAttempts 
-            ? 'Account locked due to too many failed attempts.' 
+            ? `Account locked for ${lockoutMins} minutes due to too many failed attempts.` 
             : `Invalid credentials. ${maxAttempts - attempts} attempts remaining.`
         });
       }
@@ -68,14 +72,12 @@ const authController = {
       await userModel.updateLastLogin(user.user_id);
       try { await auditLogModel.logAction(user.user_id, 'LOGIN', 'users', user.user_id); } catch (e) {}
 
-      // 3. Fetch Dynamic Session Timeout
-      const timeoutVal = await settingModel.getValue('session_timeout');
-      const timeoutMins = timeoutVal ? parseInt(timeoutVal) : 30; // Default to 30 mins
-
+      // JWT Generation
+      // FIXED: Session timeout is now static (1 hour) since the setting governs lockout duration
       const accessToken = jwt.sign(
         { user_id: user.user_id, username: user.username, role: user.role, email: user.email },
         process.env.JWT_SECRET,
-        { expiresIn: `${timeoutMins}m` } // Use dynamic timeout
+        { expiresIn: '1h' } 
       );
 
       // Refresh token logic
@@ -116,18 +118,16 @@ const authController = {
           if (!user) 
             return res.status(403).json({ success: false, message: 'User not found' });
           
-          // Optional: Also use dynamic timeout for refresh token access token generation
-          const timeoutVal = await settingModel.getValue('session_timeout');
-          const timeoutMins = timeoutVal ? parseInt(timeoutVal) : 15;
-
+          // FIXED: Static 1 hour expiration for consistency
           const accessToken = jwt.sign(
             {
               user_id: user.user_id,
               username: user.username,
-              role: user.role
+              role: user.role,
+              email: user.email 
             },
             process.env.JWT_SECRET,
-            { expiresIn: `${timeoutMins}m` }
+            { expiresIn: '1h' }
           );
 
           return res.json({ success: true, accessToken });
@@ -256,7 +256,6 @@ const authController = {
 
       await userModel.update(userId, { password_hash: newHashedPassword });
 
-      // Audit Log: Change Password
       try {
         await auditLogModel.logAction(userId, 'CHANGE_PASSWORD', 'users', userId);
       } catch (logError) {
