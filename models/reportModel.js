@@ -31,10 +31,28 @@ class ReportModel extends BaseModel {
     return results[0] || null;
   }
 
+  // --- UPDATED METHOD: Added 'Automated' Filter ---
+  async getReportHistory(startDate, endDate) {
+    const query = `
+      SELECT 
+        report_id, 
+        report_type, 
+        period_start, 
+        period_end, 
+        created_at, 
+        generated_by 
+      FROM reports 
+      WHERE report_type = 'Automated' 
+      AND DATE(created_at) BETWEEN ? AND ?
+      ORDER BY created_at DESC
+    `;
+    return this.executeQuery(query, [startDate, endDate]);
+  }
+  // ------------------------------------------------
+
   // --- ANALYTICS METHODS ---
 
   async getSalesKPIs(startDate, endDate) {
-    // FIX: Add status = 'Completed' filter
     const query = `
       SELECT
         COALESCE(SUM(total_amount), 0) as total_revenue,
@@ -59,7 +77,6 @@ class ReportModel extends BaseModel {
       default:        dateFormat = '%Y-%m-%d'; // daily
     }
     
-    // FIX: Add status = 'Completed' filter
     const query = `
       SELECT
         DATE_FORMAT(transaction_date, '${dateFormat}') as date_label,
@@ -75,7 +92,6 @@ class ReportModel extends BaseModel {
   }
 
   async getSalesByCategory(startDate, endDate) {
-    // FIX: Add status = 'Completed' filter
     const query = `
       SELECT
         pc.category_name,
@@ -92,7 +108,6 @@ class ReportModel extends BaseModel {
     return this.executeQuery(query, [startDate, endDate]);
   }
 
-  // FIX: Normalize payment methods and add status filter
   async getPaymentMethodStats(startDate, endDate) {
     const query = `
       SELECT
@@ -111,7 +126,6 @@ class ReportModel extends BaseModel {
     return this.executeQuery(query, [startDate, endDate]);
   }
 
-  // FIX: Add status = 'Completed' filter, include category name, profit, AND margin %
   async getTopSellingProducts(startDate, endDate) {
     const query = `
       SELECT
