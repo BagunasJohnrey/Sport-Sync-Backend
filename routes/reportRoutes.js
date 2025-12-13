@@ -14,9 +14,13 @@ router.get('/inventory', authMiddleware.requireRole(['Admin', 'Staff', 'Cashier'
 // Backup - Admin Only
 router.get('/backup', authMiddleware.requireRole(['Admin']), reportController.exportDatabase);
 
-// Add this line with the other report routes
+// Profitability
 router.get('/profitability', authMiddleware.requireRole(['Admin', 'Staff']), reportController.getProfitabilityAnalysis);
 
-// routes/reportRoutes.js
+// Download
 router.get('/download', authMiddleware.requireRole(['Admin', 'Staff']), reportController.downloadReport);
+
+// History (Automated Reports List)
+router.get('/history', authMiddleware.requireRole(['Admin', 'Staff']), reportController.getReportHistory);
+
 module.exports = router;

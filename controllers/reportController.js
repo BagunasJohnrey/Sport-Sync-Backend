@@ -37,29 +37,20 @@ const reportController = {
     }
   },
 
-  // ✅ FIX: Updated Inventory Report to use global settings consistently
+  // 2. Inventory Report
   getInventoryReport: async (req, res) => {
     try {
-      // Fetch global settings for thresholds
       const criticalThresholdVal = await settingModel.getValue('stock_threshold_critical');
       const lowThresholdVal = await settingModel.getValue('stock_threshold_low');
       
       const criticalThreshold = criticalThresholdVal ? parseInt(criticalThresholdVal) : 10;
       const lowThreshold = lowThresholdVal ? parseInt(lowThresholdVal) : 20;
 
-      // Pass both thresholds to ensure consistent KPI calculations
       const [summary, byCategory, lowStock] = await Promise.all([
         productModel.getInventorySummary(criticalThreshold, lowThreshold),
         productModel.getInventoryByCategory(),
         productModel.getLowStockProducts(criticalThreshold, lowThreshold)
       ]);
-
-      console.log('📊 Inventory Report Data:');
-      console.log('  - Critical Threshold:', criticalThreshold);
-      console.log('  - Low Threshold:', lowThreshold);
-      console.log('  - Critical Stock Count (<= critical):', summary.critical_stock_count);
-      console.log('  - Low Stock Count (> critical and <= low):', summary.low_stock_count);
-      console.log('  - Low Stock Products (Alert):', lowStock.length);
 
       res.json({
         success: true,
@@ -87,16 +78,11 @@ const reportController = {
       dumpContent += `-- Generated: ${new Date().toISOString()}\n\n`;
       dumpContent += "SET FOREIGN_KEY_CHECKS=0;\n\n";
 
-      // 1. Get all tables
       const [tables] = await connection.query('SHOW TABLES');
-      
-      // The key in the result object depends on DB name, so we grab the first value
       const tableKey = Object.keys(tables[0])[0];
 
       for (const tableRow of tables) {
         const tableName = tableRow[tableKey];
-
-        // 2. Get Create Table Statement
         const [createResult] = await connection.query(`SHOW CREATE TABLE \`${tableName}\``);
         const createSQL = createResult[0]['Create Table'];
 
@@ -104,22 +90,16 @@ const reportController = {
         dumpContent += `DROP TABLE IF EXISTS \`${tableName}\`;\n`;
         dumpContent += `${createSQL};\n\n`;
 
-        // 3. Get Table Data
         const [rows] = await connection.query(`SELECT * FROM \`${tableName}\``);
         
         if (rows.length > 0) {
             dumpContent += `-- Data for table \`${tableName}\`\n`;
-            
-            // Get column names
             const columns = Object.keys(rows[0]).map(col => `\`${col}\``).join(', ');
-            
-            // Format values
             const values = rows.map(row => {
                 const rowValues = Object.values(row).map(val => {
                     if (val === null) return 'NULL';
                     if (typeof val === 'number') return val;
                     if (val instanceof Date) return `'${val.toISOString().slice(0, 19).replace('T', ' ')}'`;
-                    // Escape single quotes for SQL
                     return `'${String(val).replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
                 }).join(', ');
                 return `(${rowValues})`;
@@ -130,10 +110,8 @@ const reportController = {
       }
 
       dumpContent += "SET FOREIGN_KEY_CHECKS=1;\n";
-
       const fileName = `backup_${new Date().toISOString().slice(0,10).replace(/-/g, '')}.sql`;
       
-      // Send file download headers
       res.setHeader('Content-Type', 'application/octet-stream');
       res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
       res.send(dumpContent);
@@ -149,12 +127,8 @@ const reportController = {
   // 4. Profitability Analysis
   getProfitabilityAnalysis: async (req, res) => {
     try {
-      // Extract the dates from the request
       const { start_date, end_date } = req.query; 
-
-      // Pass these dates to the Model
       const profitabilityData = await productModel.getProductProfitability(start_date, end_date);
-      
       res.json({ success: true, data: profitabilityData });
     } catch (error) {
       res.status(500).json({ success: false, message: error.message });
@@ -164,7 +138,7 @@ const reportController = {
   // 5. Download Report
   downloadReport: async (req, res) => {
     try {
-      const { id, format } = req.query; // format = 'pdf' or 'excel'
+      const { id, format } = req.query; 
       const report = await reportModel.findById(id);
 
       if (!report) return res.status(404).json({ message: 'Report not found' });
@@ -184,6 +158,27 @@ const reportController = {
     } catch (error) {
       console.error('Download Error:', error);
       res.status(500).json({ message: 'Download failed' });
+    }
+  },
+
+  // --- NEW METHOD ---
+  getReportHistory: async (req, res) => {
+    try {
+      const { start_date, end_date } = req.query;
+      
+      const end = end_date || new Date().toISOString().split('T')[0];
+      const start = start_date || new Date().toISOString().split('T')[0];
+
+      // Calls the model which now filters for "Automated" reports only
+      const reports = await reportModel.getReportHistory(start, end);
+
+      res.json({
+        success: true,
+        data: reports
+      });
+    } catch (error) {
+      console.error('Report History Error:', error);
+      res.status(500).json({ success: false, message: error.message });
     }
   }
 };
