@@ -5,10 +5,9 @@ const bcrypt = require('bcryptjs');
 const { notifyRole } = require('../services/notificationService');
 
 const userController = {
-  // Get all users (MODIFIED FOR DYNAMIC SEARCH)
+  // Get all users
   getAllUsers: async (req, res) => {
     try {
-      // Added 'search' to destructuring
       const { page = 1, limit = 10, role, status, search } = req.query; 
       const parsedLimit = parseInt(limit);
       const parsedPage = parseInt(page);
@@ -17,12 +16,10 @@ const userController = {
       let conditions = {};
       if (role) conditions.role = role;
       if (status) conditions.status = status;
-      if (search) conditions.search = search; // Pass search term to the model
+      if (search) conditions.search = search;
 
-      // Fetch all matching users (filtered and searched) using the new model method
       const allMatchingUsers = await userModel.findAllUsersWithSearch(conditions); 
       
-      // Manual pagination
       const paginatedUsers = allMatchingUsers.slice(offset, offset + parsedLimit);
       const total = allMatchingUsers.length;
 
@@ -43,6 +40,7 @@ const userController = {
       });
     }
   },
+
   // Get user by ID
   getUserById: async (req, res) => {
     try {
@@ -80,7 +78,6 @@ const userController = {
 
       const { full_name, username, password, role, email, status } = req.body;
       
-      // Check if username or email already exists
       const existingUser = await userModel.findByUsername(username);
       if (existingUser) {
         return res.status(400).json({
@@ -97,7 +94,6 @@ const userController = {
         });
       }
 
-      // Hash the password before saving
       const hashedPassword = await bcrypt.hash(password, 10);
 
       const userData = {
@@ -112,16 +108,12 @@ const userController = {
 
       const newUser = await userModel.create(userData);
       
-      // Audit Log: Create User
-      // req.user.user_id is the Admin performing the action
-      // newUser.id is the new account ID (returned by BaseModel.create)
       try {
         await auditLogModel.logAction(req.user.user_id, 'CREATE_USER', 'users', newUser.id);
       } catch (auditError) {
         console.error('Failed to log create user action:', auditError);
       }
 
-      // --- NOTIFICATION: New User Registered ---
       await notifyRole(
         'Admin', 
         `New user account created: ${username} (${role})`, 
@@ -129,7 +121,6 @@ const userController = {
         newUser.id
       );
 
-      // Remove password hash from response
       const { password_hash, ...userResponse } = newUser;
       
       res.status(201).json({
@@ -169,14 +160,12 @@ const userController = {
 
       const updatedUser = await userModel.update(userId, updateData);
       
-      // Audit Log: Update User
       try {
         await auditLogModel.logAction(req.user.user_id, 'UPDATE_USER', 'users', userId);
       } catch (auditError) {
         console.error('Failed to log update user action:', auditError);
       }
 
-      // Remove password hash from response
       const { password_hash, ...userResponse } = updatedUser;
       
       res.json({
@@ -192,25 +181,53 @@ const userController = {
     }
   },
 
-  // Delete user
+  // --- FIXED DELETE USER FUNCTION ---
   deleteUser: async (req, res) => {
     try {
       const userId = req.params.id;
       
-      await userModel.delete(userId);
-
-      // Audit Log: Delete User
       try {
-        await auditLogModel.logAction(req.user.user_id, 'DELETE_USER', 'users', userId);
-      } catch (auditError) {
-        console.error('Failed to log delete user action:', auditError);
+        // 1. Attempt Permanent Delete
+        await userModel.delete(userId);
+
+        try {
+          await auditLogModel.logAction(req.user.user_id, 'DELETE_USER', 'users', userId);
+        } catch (auditError) {}
+        
+        return res.json({
+          success: true,
+          message: 'User permanently deleted (no history found)'
+        });
+
+      } catch (dbError) {
+        // 2. CHECK FOR FOREIGN KEY ERROR (Robust Check)
+        // We check the error CODE or the error MESSAGE text
+        const isForeignKeyError = 
+            dbError.errno === 1451 || 
+            dbError.code === 'ER_ROW_IS_REFERENCED_2' || 
+            (dbError.message && dbError.message.includes('foreign key constraint fails'));
+
+        if (isForeignKeyError) {
+             
+             // 3. Fallback: Soft Delete (Deactivate)
+             await userModel.update(userId, { status: 'Inactive' });
+
+             try {
+               await auditLogModel.logAction(req.user.user_id, 'DEACTIVATE_USER', 'users', userId);
+             } catch (auditError) {}
+
+             return res.json({
+               success: true,
+               message: 'User deactivated successfully (history preserved)'
+             });
+        }
+
+        // If it's a different error, re-throw it
+        throw dbError;
       }
-      
-      res.json({
-        success: true,
-        message: 'User deleted successfully'
-      });
+
     } catch (error) {
+      console.error('Delete User Error:', error);
       res.status(500).json({
         success: false,
         message: error.message
