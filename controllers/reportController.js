@@ -6,7 +6,7 @@ const { generatePDF } = require('../services/pdfService');
 const { generateExcel } = require('../services/excelService');
 
 const reportController = {
-  // 1. Sales Dashboard Analytics
+  // Existing Dashboard Methods
   getDashboardAnalytics: async (req, res) => {
     try {
       const { start_date, end_date, period = 'daily' } = req.query;
@@ -37,7 +37,6 @@ const reportController = {
     }
   },
 
-  // 2. Inventory Report
   getInventoryReport: async (req, res) => {
     try {
       const criticalThresholdVal = await settingModel.getValue('stock_threshold_critical');
@@ -55,10 +54,7 @@ const reportController = {
       res.json({
         success: true,
         data: {
-          summary: {
-            ...summary,
-            products_requiring_attention: lowStock
-          },
+          summary: { ...summary, products_requiring_attention: lowStock },
           inventory_by_category: byCategory,
           products_requiring_attention: lowStock
         }
@@ -69,7 +65,32 @@ const reportController = {
     }
   },
 
-  // 3. Database Backup 
+  // NEW METHOD: Get Report History for Frontend List
+  getReportHistory: async (req, res) => {
+    try {
+      const { start_date, end_date } = req.query;
+      let query = 'SELECT * FROM reports WHERE 1=1';
+      const params = [];
+
+      if (start_date && end_date) {
+        // Adjust end date to include the full day
+        let end = end_date;
+        if (end.length === 10) end += ' 23:59:59';
+        
+        query += ' AND created_at BETWEEN ? AND ?';
+        params.push(start_date, end);
+      }
+      
+      query += ' ORDER BY created_at DESC';
+      
+      const reports = await reportModel.executeQuery(query, params);
+      res.json({ success: true, data: reports });
+    } catch (error) {
+      console.error('Fetch History Error:', error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  },
+
   exportDatabase: async (req, res) => {
     let connection;
     try {
@@ -94,7 +115,9 @@ const reportController = {
         
         if (rows.length > 0) {
             dumpContent += `-- Data for table \`${tableName}\`\n`;
+            
             const columns = Object.keys(rows[0]).map(col => `\`${col}\``).join(', ');
+            
             const values = rows.map(row => {
                 const rowValues = Object.values(row).map(val => {
                     if (val === null) return 'NULL';
@@ -110,6 +133,7 @@ const reportController = {
       }
 
       dumpContent += "SET FOREIGN_KEY_CHECKS=1;\n";
+
       const fileName = `backup_${new Date().toISOString().slice(0,10).replace(/-/g, '')}.sql`;
       
       res.setHeader('Content-Type', 'application/octet-stream');
@@ -124,7 +148,6 @@ const reportController = {
     }
   },
 
-  // 4. Profitability Analysis
   getProfitabilityAnalysis: async (req, res) => {
     try {
       const { start_date, end_date } = req.query; 
@@ -135,10 +158,9 @@ const reportController = {
     }
   },
 
-  // 5. Download Report
   downloadReport: async (req, res) => {
     try {
-      const { id, format } = req.query; 
+      const { id, format } = req.query;
       const report = await reportModel.findById(id);
 
       if (!report) return res.status(404).json({ message: 'Report not found' });
@@ -158,27 +180,6 @@ const reportController = {
     } catch (error) {
       console.error('Download Error:', error);
       res.status(500).json({ message: 'Download failed' });
-    }
-  },
-
-  // --- NEW METHOD ---
-  getReportHistory: async (req, res) => {
-    try {
-      const { start_date, end_date } = req.query;
-      
-      const end = end_date || new Date().toISOString().split('T')[0];
-      const start = start_date || new Date().toISOString().split('T')[0];
-
-      // Calls the model which now filters for "Automated" reports only
-      const reports = await reportModel.getReportHistory(start, end);
-
-      res.json({
-        success: true,
-        data: reports
-      });
-    } catch (error) {
-      console.error('Report History Error:', error);
-      res.status(500).json({ success: false, message: error.message });
     }
   }
 };

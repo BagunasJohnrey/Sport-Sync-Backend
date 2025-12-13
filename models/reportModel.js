@@ -11,16 +11,44 @@ class ReportModel extends BaseModel {
     return results[0] || null;
   }
 
+  // ✅ CRASH-PROOF SAVE METHOD
   async saveReport(reportData) {
-    const { report_type, period_start, period_end, generated_by, total_sales, total_transactions, data } = reportData;
+    const { report_type, period_start, period_end, generated_by, total_sales, total_transactions, data, file_path } = reportData;
+    
     const existing = await this.findByTypeAndDate(report_type, period_start);
     const jsonData = JSON.stringify(data);
 
+    console.log("DEBUG REPORT DATA:", reportData);
+    
+    // FIX: Convert 'undefined' to 'null' for database safety
+    const safeGeneratedBy = generated_by !== undefined ? generated_by : null;
+    const safeFilePath = file_path !== undefined ? file_path : null;
+    const safeTotalSales = total_sales || 0;
+    const safeTotalTransactions = total_transactions || 0;
+
     if (existing) {
-      await this.update(existing.report_id, { generated_by, total_sales, total_transactions, data: jsonData, created_at: new Date() });
+      await this.update(existing.report_id, { 
+        generated_by: safeGeneratedBy, 
+        total_sales: safeTotalSales, 
+        total_transactions: safeTotalTransactions, 
+        data: jsonData, 
+        file_path: safeFilePath, 
+        created_at: new Date() 
+      });
       return { report_id: existing.report_id, action: 'updated' };
     } else {
-      const result = await this.create({ report_type, period_start, period_end, generated_by, total_sales, total_transactions, format: 'JSON', data: jsonData, created_at: new Date() });
+      const result = await this.create({ 
+        report_type, 
+        period_start, 
+        period_end, 
+        generated_by: safeGeneratedBy, 
+        total_sales: safeTotalSales, 
+        total_transactions: safeTotalTransactions, 
+        format: 'JSON', 
+        data: jsonData, 
+        file_path: safeFilePath, 
+        created_at: new Date() 
+      });
       return { report_id: result.id, action: 'created' };
     }
   }
@@ -30,25 +58,6 @@ class ReportModel extends BaseModel {
     const results = await this.executeQuery(query, [type]);
     return results[0] || null;
   }
-
-  // --- UPDATED METHOD: Added 'Automated' Filter ---
-  async getReportHistory(startDate, endDate) {
-    const query = `
-      SELECT 
-        report_id, 
-        report_type, 
-        period_start, 
-        period_end, 
-        created_at, 
-        generated_by 
-      FROM reports 
-      WHERE report_type = 'Automated' 
-      AND DATE(created_at) BETWEEN ? AND ?
-      ORDER BY created_at DESC
-    `;
-    return this.executeQuery(query, [startDate, endDate]);
-  }
-  // ------------------------------------------------
 
   // --- ANALYTICS METHODS ---
 
@@ -74,7 +83,7 @@ class ReportModel extends BaseModel {
     switch(period) {
       case 'monthly': dateFormat = '%Y-%m'; break;
       case 'weekly':  dateFormat = '%Y-W%u'; break;
-      default:        dateFormat = '%Y-%m-%d'; // daily
+      default:        dateFormat = '%Y-%m-%d'; 
     }
     
     const query = `

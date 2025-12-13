@@ -20,7 +20,7 @@ router.get('/profitability', authMiddleware.requireRole(['Admin', 'Staff']), rep
 // Download
 router.get('/download', authMiddleware.requireRole(['Admin', 'Staff']), reportController.downloadReport);
 
-// History (Automated Reports List)
-router.get('/history', authMiddleware.requireRole(['Admin', 'Staff']), reportController.getReportHistory);
+// NEW: Report History for Automated Reports
+router.get('/history', authMiddleware.requireRole(['Admin']), reportController.getReportHistory);
 
 module.exports = router;

@@ -1,12 +1,35 @@
-// services/pdfService.js
 const PDFDocument = require('pdfkit');
 
-// Helper to format date string from YYYY-MM-DD to DD-MMM-YYYY
-const formatDate = (dateStr) => {
-    if (!dateStr) return 'N/A';
-    // Use Date object for robust locale-aware formatting
-    const date = new Date(dateStr + 'T00:00:00'); // Add time to avoid timezone issues
+// ✅ FIX: Robust Helper to format date string for DISPLAY (e.g. "Dec 13, 2025")
+const formatDate = (dateInput) => {
+    if (!dateInput) return 'N/A';
+
+    let date;
+    // If it's already a Date object (from DB), use it directly
+    if (dateInput instanceof Date) {
+        date = dateInput;
+    } 
+    // If it's a string (e.g., "2025-12-13"), convert it safely
+    else {
+        // Ensure we only have the YYYY-MM-DD part to prevent timezone shifts
+        const cleanDateStr = typeof dateInput === 'string' ? dateInput.split('T')[0] : dateInput;
+        date = new Date(cleanDateStr + 'T00:00:00');
+    }
+
+    // Check if date is valid
+    if (isNaN(date.getTime())) return 'Invalid Date';
+
     return date.toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: '2-digit' });
+};
+
+// ✅ NEW: Helper to format date for FILENAME (e.g. "2025-12-13")
+const formatForFilename = (dateInput) => {
+    if (!dateInput) return 'unknown';
+    // If it's a Date object, convert to ISO string first so we can split it
+    const str = (dateInput instanceof Date) 
+        ? dateInput.toISOString() 
+        : String(dateInput);
+    return str.split('T')[0]; // Returns YYYY-MM-DD
 };
 
 // Helper to draw a table (simple implementation for Daily Breakdown)
@@ -77,9 +100,28 @@ const drawTable = (doc, data, headers, yStart, xStart = 50) => {
 const generatePDF = (reportData, res) => {
     const doc = new PDFDocument({ margin: 50 }); // Set margins for cleaner look
     
-    // Set headers
+    // --- ✅ NEW FILENAME LOGIC STARTS HERE ---
+    let filenameDate = '';
+    const start = formatForFilename(reportData.period_start);
+    const end = formatForFilename(reportData.period_end);
+
+    if (reportData.report_type === 'Daily') {
+        // Example: Daily_Report_2025-12-13.pdf
+        filenameDate = start;
+    } else if (reportData.report_type === 'Monthly') {
+        // Example: Monthly_Report_2025-12.pdf
+        filenameDate = start.substring(0, 7); // Get YYYY-MM
+    } else {
+        // Example: Weekly_Report_2025-12-07_to_2025-12-13.pdf
+        filenameDate = `${start}_to_${end}`;
+    }
+
+    const filename = `${reportData.report_type}_Report_${filenameDate}.pdf`;
+    
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename=report_${reportData.report_type}_${Date.now()}.pdf`);
+    // Use quotes around filename to handle spaces safely
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    // --- NEW FILENAME LOGIC ENDS HERE ---
 
     doc.pipe(res);
 

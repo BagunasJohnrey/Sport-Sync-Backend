@@ -67,6 +67,8 @@ const authController = {
       if (user.failed_login_attempts > 0 || user.lockout_until) {
         await userModel.update(user.user_id, { failed_login_attempts: 0, lockout_until: null });
       }
+      
+      // [SOFT DELETE CHECK] Prevent login if user is Inactive
       if (user.status !== 'Active') return res.status(401).json({ success: false, message: 'Account is inactive.' });
 
       await userModel.updateLastLogin(user.user_id);
@@ -85,7 +87,15 @@ const authController = {
       const refreshExpiresAt = new Date(); refreshExpiresAt.setDate(refreshExpiresAt.getDate() + 7);
       await userModel.storeRefreshToken(user.user_id, refreshToken, refreshExpiresAt);
 
-      res.cookie('refresh_token', refreshToken, { httpOnly: true, secure: true, sameSite: 'None', maxAge: 7 * 24 * 3600000 });
+      // [COOKIE FIX] Dynamic settings for Localhost vs Production
+      const isProduction = process.env.NODE_ENV === 'production';
+      res.cookie('refresh_token', refreshToken, { 
+          httpOnly: true, 
+          secure: isProduction, 
+          sameSite: isProduction ? 'None' : 'Lax', 
+          maxAge: 7 * 24 * 3600000 
+      });
+
       const { password_hash, ...userSafe } = user;
       res.json({ success: true, message: 'Login successful', accessToken, user: userSafe });
 
@@ -115,8 +125,10 @@ const authController = {
             return res.status(403).json({ success: false, message: 'Token not found or reused' });
 
           const user = await userModel.findById(decoded.user_id);
-          if (!user) 
-            return res.status(403).json({ success: false, message: 'User not found' });
+          
+          // [SOFT DELETE CHECK] Ensure Inactive users cannot refresh tokens
+          if (!user || user.status !== 'Active') 
+            return res.status(403).json({ success: false, message: 'User not found or inactive' });
           
           // FIXED: Static 1 hour expiration for consistency
           const accessToken = jwt.sign(
@@ -150,10 +162,12 @@ const authController = {
         await userModel.deleteRefreshTokenForUser(decoded.user_id);
     }
 
+    // [COOKIE FIX] Match login settings
+    const isProduction = process.env.NODE_ENV === 'production';
     res.clearCookie('refresh_token', {
       httpOnly: true,
-      sameSite: 'None',
-      secure: true
+      sameSite: isProduction ? 'None' : 'Lax',
+      secure: isProduction
     });
 
     res.json({ success: true, message: 'Logged out' });
