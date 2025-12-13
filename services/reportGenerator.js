@@ -2,14 +2,14 @@ const { pool } = require('../db/connection');
 
 class reportGenerator {
   
-  // UR 3.2: Helper to calculate profit margin
   calculateProfitMargin(revenue, profit) {
     if (!revenue || revenue <= 0) return 0;
     return parseFloat(((profit / revenue) * 100).toFixed(2));
   }
 
   async generateDailyStats(dateStr) {
-    // Aggregates revenue, counts, and calculated profit
+    console.log("⚡ CORRECT FILE LOADED - Generating Daily Report for:", dateStr); 
+
     const query = `
       SELECT 
         COUNT(DISTINCT t.transaction_id) as total_transactions,
@@ -30,11 +30,15 @@ class reportGenerator {
     const profit = parseFloat(result.total_profit || 0);
     const transactions = parseInt(result.total_transactions || 0);
 
-    // Return object structured for the saveReport method
+    // ✅ FIX: Generate the Name
+    const reportName = `Daily Report - ${dateStr}`;
+    console.log("⚡ REPORT NAME GENERATED:", reportName);
+
     return {
       report_type: 'Daily',
+      file_path: reportName, // ✅ Sending name to Model
       period_start: dateStr,
-      period_end: dateStr, // For daily, start and end are the same
+      period_end: dateStr,
       total_sales: revenue,
       total_transactions: transactions,
       data: {
@@ -47,9 +51,7 @@ class reportGenerator {
     };
   }
 
-    
   async generateWeeklyStats(endDateStr) {
-    // Calculate start date (7 days ago)
     const end = new Date(endDateStr);
     const start = new Date(end);
     start.setDate(start.getDate() - 6);
@@ -66,11 +68,14 @@ class reportGenerator {
       AND t.status = 'Completed'
     `;
 
-    const [stats] = await this.pool.execute(query, [startDateStr, endDateStr]);
+    const [stats] = await pool.execute(query, [startDateStr, endDateStr]);
     const result = stats[0];
+
+    const reportName = `Weekly Report - ${startDateStr} to ${endDateStr}`;
 
     return {
       report_type: 'Weekly',
+      file_path: reportName,
       period_start: startDateStr,
       period_end: endDateStr,
       total_sales: parseFloat(result.total_revenue || 0),
@@ -84,7 +89,6 @@ class reportGenerator {
   }
 
   async generateMonthlyStats(monthStr) {
-    // monthStr format: 'YYYY-MM'
     const query = `
       SELECT 
         DATE(t.transaction_date) as day,
@@ -111,14 +115,16 @@ class reportGenerator {
       totalTransactions += parseInt(row.daily_transactions || 0);
     });
 
-    // Calculate start and end dates for the table
     const startDate = `${monthStr}-01`;
     const dateObj = new Date(startDate);
-    const endDateObj = new Date(dateObj.getFullYear(), dateObj.getMonth() + 1, 0); // Last day of month
+    const endDateObj = new Date(dateObj.getFullYear(), dateObj.getMonth() + 1, 0); 
     const endDate = endDateObj.toISOString().split('T')[0];
+
+    const reportName = `Monthly Report - ${monthStr}`;
 
     return {
       report_type: 'Monthly',
+      file_path: reportName,
       period_start: startDate,
       period_end: endDate,
       total_sales: totalRevenue,
@@ -132,7 +138,6 @@ class reportGenerator {
       }
     };
   }
-
 }
 
 module.exports = new reportGenerator();
