@@ -193,7 +193,7 @@ const transactionController = {
       }
       
       // 3. Check High Value Transaction
-      if (total_amount >= 5000) {
+      if (total_amount >= 10000) {
          await notifyRole(
            'Admin',
            `High Value Sale: Transaction #${transactionId} for ₱${total_amount.toLocaleString()} recorded.`,
